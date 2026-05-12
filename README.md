@@ -67,10 +67,7 @@ Wemos D1 Mini                                                  DMX connector
 
 ## Interlocked Relay Wiring
 
-Each curtain requires one interlocked relay pair. The relay set has:
-- **K1 coil**: controlled by `DIRECTION_PIN` (selects rewind)
-- **K2 coil**: complement of K1 (selects forward)
-- **ENABLE relay**: controlled by `ENABLE_PIN` (permits motor movement)
+Each curtain requires one interlocked relay pair.
 
 ```
 LEFT CURTAIN CONTROL (example)
@@ -80,7 +77,7 @@ LEFT CURTAIN CONTROL (example)
                      |        \      |
    ENABLE_PIN  ------| IN      + COM |------  COM
                      |               |
-          GND  ------| GND   +--- NO |-----------------+ 
+          GND  ------| GND   +--- NO |-----------------+
                      +---------------+                 |
                                                        |
                                                        |
