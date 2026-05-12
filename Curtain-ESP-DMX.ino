@@ -8,13 +8,13 @@
     Example using LXDMXWiFi_Library for output of Art-Net or E1.31 sACN from
     ESP 8266 WiFi connection to serial DMX.  Or, input from DMX to the network.
     Allows remote configuration of WiFi connection and protocol settings.
-    
+
     Art-Net(TM) Designed by and Copyright Artistic Licence Holdings Ltd.
     sACN E 1.31 is a public standard published by the PLASA technical standards program
-    
+
     Note:  For sending packets larger than 512 bytes, ESP8266 WiFi Library v2.1
            is necessary.
-           
+
            This example requires the LXESP8266DMX library, v2.0 with RDM support
            https://github.com/claudeheintz/LXESP8266DMX
 
@@ -35,8 +35,8 @@
     v5.0 - Adds RDM support (requires LXESP8266DMX library v2.0)
     v5.1 - Change to on demand RDM discovery
     		  RDM discovery runs for limited cycles at startup and after TOD request.
-    		  
-    v5.2 - Add USE_REMOTE_CONFIG option 
+
+    v5.2 - Add USE_REMOTE_CONFIG option
 
     v6.0 - Refactor to clarify functionality
            -move RDM functions to separate file
@@ -77,7 +77,7 @@
 CurtainController leftCurtain(LEFT_CURTAIN_ENABLE_PIN, LEFT_CURTAIN_DIRECTION_PIN);
 CurtainController rightCurtain(RIGHT_CURTAIN_ENABLE_PIN, RIGHT_CURTAIN_DIRECTION_PIN);
 
-/*         
+/*
  *  To allow use of the configuration utility, uncomment the following statement
  *  to define USE_REMOTE_CONFIG.
  *
@@ -141,16 +141,16 @@ uint8_t led_state = 0;
 /************************************************************************
 
   Setup creates the WiFi connection.
-  
+
   It also creates the network protocol object,
   either an instance of LXWiFiArtNet or LXWiFiSACN.
-  
+
   if OUTPUT_FROM_NETWORK_MODE:
      Starts listening on the appropriate UDP port.
-  
+
      And, it starts the ESP8266DMX sending serial DMX via the UART1 TX pin.
      (see the LXESP8266DMX library documentation for driver details)
-     
+
    if INPUT_TO_NETWORK_MODE:
      Starts ESP8266DMX listening for DMX ( received as serial on UART0 RX pin. )
 
@@ -164,12 +164,12 @@ void setup() {
   pinMode(DIRECTION_PIN, OUTPUT);
 
 #ifdef USE_REMOTE_CONFIG
-  uint8_t bootStatus = DMXWiFiConfig.begin(digitalRead(STARTUP_MODE_PIN));	// uses settings from persistent memory unless pin is low. 
+  uint8_t bootStatus = DMXWiFiConfig.begin(digitalRead(STARTUP_MODE_PIN));	// uses settings from persistent memory unless pin is low.
 #else
   uint8_t bootStatus = DMXWiFiConfig.begin();								// must edit DMXWiFiConfig.initConfig() to change settings
 #endif
   uint8_t dhcpStatus = 0;
-  
+
   dmx_direction = DMXWiFiConfig.inputToNetworkMode();
   setRDMisEnabled(DMXWiFiConfig.rdmMode());
 
@@ -190,12 +190,12 @@ void setup() {
     ESP8266DMX.startOutput();
   }
 
-  // -------------------   WiFi  ------------------- 
+  // -------------------   WiFi  -------------------
 
   Serial.print("initializing wifi... ");
-  
+
   uint8_t wifi_result = DMXWiFiConfig.setupWiFi(blinkLED);
-  
+
   if ( wifi_result & LX_AP_MODE ) {
     Serial.print("created access point ");
     Serial.println(DMXWiFiConfig.SSID());
@@ -205,11 +205,11 @@ void setup() {
     }
     Serial.println("wifi started.");
   }
- 
-  
+
+
   //------------------- Initialize network<->DMX interfaces -------------------
-    
-  sACNInterface = new LXWiFiSACN();							
+
+  sACNInterface = new LXWiFiSACN();
   sACNInterface->setUniverse(DMXWiFiConfig.sACNUniverse());
 
   artNetInterface = new LXWiFiArtNet(WiFi.localIP(), WiFi.subnetMask());
@@ -238,7 +238,7 @@ void setup() {
     artNetInterface->setStatus1Flag(ARTNET_STATUS1_RDM_CAPABLE, 1);
   }
   Serial.print("interfaces created, ");
-  
+
   // start _UDP objects
 	if ( DMXWiFiConfig.multicastMode() ) {
 		if ( DMXWiFiConfig.APMode() ) {
@@ -249,9 +249,9 @@ void setup() {
 	} else {
 		sUDP.begin(sACNInterface->dmxPort());
 	}
-  
+
   aUDP.begin(artNetInterface->dmxPort());
-  if ( dmx_direction == 0 ) {  
+  if ( dmx_direction == 0 ) {
     artNetInterface->send_art_poll_reply(&aUDP);
   } else {
     artNetInterface->send_art_poll_reply(&aUDP, ARTPOLL_INPUT_MODE);
@@ -260,7 +260,7 @@ void setup() {
 
   leftCurtain.begin();
   rightCurtain.begin();
-  
+
   Serial.println(" setup complete.");
   blinkLED();
 } //setup
@@ -269,15 +269,15 @@ void setup() {
 /************************************************************************
 
   Main loop
-  
+
   if OUTPUT_FROM_NETWORK_MODE:
     checks for and reads packets from WiFi UDP socket
     connection.  readDMXPacket() returns true when a DMX packet is received.
-    
+
     If dmx is received on either interface, copy from both (HTP) to dmx output.
-  
+
     If the packet is an CONFIG_PACKET_IDENT packet, the config struct is modified and stored in EEPROM
-  
+
   if INPUT_TO_NETWORK_MODE:
     if serial dmx has been received, sends an sACN or Art-Net packet containing the dmx data.
     Note:  does not listen for incoming packets for remote configuration in this mode.
@@ -286,7 +286,7 @@ void setup() {
 
 void loop() {
 	if ( dmx_direction ) {    //direction is input to network
-  
+
 		if ( DMXWiFiConfig.sACNMode() ) {
 		  checkInput(sACNInterface, &sUDP, DMXWiFiConfig.multicastMode());
 		} else {
@@ -305,34 +305,34 @@ void loop() {
         DMXWiFiConfig.checkConfigReceived(artNetInterface, aUDP, blinkLED, CONFIG_PRINT_MESSAGES);
       }
       #endif
-    
+
       acn_packet_result = sACNInterface->readDMXPacket(&sUDP);
       #ifdef USE_REMOTE_CONFIG
       if ( acn_packet_result == RESULT_NONE ) {
         DMXWiFiConfig.checkConfigReceived(sACNInterface, aUDP, blinkLED, CONFIG_PRINT_MESSAGES);
       }
       #endif
-    
+
         if ( (art_packet_result == RESULT_DMX_RECEIVED) || (acn_packet_result == RESULT_DMX_RECEIVED) ) {
           copyDMXToCurtainControllers();
       }
 		}
 	} else {                  //direction is output from network
-  
+
 		art_packet_result = artNetInterface->readDMXPacket(&aUDP);
 		#ifdef USE_REMOTE_CONFIG
 		if ( art_packet_result == RESULT_NONE ) {
 			DMXWiFiConfig.checkConfigReceived(artNetInterface, aUDP, blinkLED, CONFIG_PRINT_MESSAGES);
 		}
 		#endif
-	
+
 		acn_packet_result = sACNInterface->readDMXPacket(&sUDP);
 		#ifdef USE_REMOTE_CONFIG
 		if ( acn_packet_result == RESULT_NONE ) {
 			DMXWiFiConfig.checkConfigReceived(sACNInterface, aUDP, blinkLED, CONFIG_PRINT_MESSAGES);
 		}
 		#endif
-	
+
 		if ( (art_packet_result == RESULT_DMX_RECEIVED) || (acn_packet_result == RESULT_DMX_RECEIVED) ) {
 		  copyDMXToOutput();
 		  blinkLED();
@@ -340,9 +340,9 @@ void loop() {
 		} else {
 		  updateRDM(artNetInterface,aUDP);
 		}
-		
+
 	}                  //direction is output from network
-	
+
   leftCurtain.update();
   rightCurtain.update();
 
@@ -364,7 +364,7 @@ void blinkLED() {
 
 /*
   DMX input callback function sets number of slots received by ESP8266DMX.
-  Input is handled in the main loop by calling checkInput which copies the 
+  Input is handled in the main loop by calling checkInput which copies the
   received values to the network interface if got_dmx is non-zero.
 */
 
@@ -376,13 +376,13 @@ void gotDMXCallback(int slots) {
 
   Checks to see if the dmx callback indicates received dmx
      If so, send it using the selected interface.
-  
+
 *************************************************************************/
 
 void checkInput(LXDMXWiFi* interface, WiFiUDP* iUDP, uint8_t multicast) {
   if ( got_dmx ) {
     interface->setNumberOfSlots(got_dmx);     // set slots & copy to interface
-    for(int i=1; i<=got_dmx; i++) {     
+    for(int i=1; i<=got_dmx; i++) {
       if (i == LEFT_CURTAIN_DMX_CHANNEL) {
         leftCurtain.setDMXValue(ESP8266DMX.getSlot(i));
       }
@@ -404,7 +404,7 @@ void checkInput(LXDMXWiFi* interface, WiFiUDP* iUDP, uint8_t multicast) {
 /************************************************************************
 
   Copy to output merges slots for Art-Net and sACN on HTP basis
-  
+
 *************************************************************************/
 
 void copyDMXToOutput(void) {
@@ -441,7 +441,7 @@ void copyDMXToOutput(void) {
 /************************************************************************
 
   Copy to output merges slots for Art-Net and sACN on HTP basis
-  
+
 *************************************************************************/
 
 void copyDMXToCurtainControllers(void) {
@@ -478,7 +478,7 @@ void copyDMXToCurtainControllers(void) {
  ************************************************************************/
 
 
-/* 
+/*
    artAddress callback allows storing of config information
    artAddress may or may not have set this information
    but relevant fields are copied to config struct and stored to EEPROM
@@ -520,7 +520,7 @@ void artCmdReceived(uint8_t* pdata) {
   }
 }
 
-/* 
+/*
    artIpProg callback allows storing of config information
    cmd field bit 7 indicates that settings should be programmed
 */
@@ -547,7 +547,7 @@ void artIpProgReceived(uint8_t cmd, IPAddress addr, IPAddress subnet) {
            }
         }
       } // else ( ! dhcp )
-      
+
       DMXWiFiConfig.commitToPersistentStore();
    }
 }

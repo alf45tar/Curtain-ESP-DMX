@@ -92,6 +92,8 @@ private:
     void applyMotion(Motion motion) {
         if (motion == STOP) {
             writeEnable(false);
+            // Set direction pin to LOW (relay not armed) to save power
+            digitalWrite(directionPin, LOW);
             return;
         }
 
