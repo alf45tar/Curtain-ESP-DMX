@@ -21,9 +21,7 @@ public:
         pinMode(enablePin, OUTPUT);
         pinMode(directionPin, OUTPUT);
 
-        // Safe startup: disable motor output.
-        writeEnable(false);
-        writeDirection(FORWARD);
+        applyMotion(STOP);
 
         lastDMXMillis = millis();
         dirty = false;
