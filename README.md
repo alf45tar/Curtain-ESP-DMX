@@ -1,10 +1,27 @@
 # DMX Curtain Controller
 
-DMX512 controller for an ESP8266 that drives two curtain motors using GPIO outputs and interlocked relays. The sketch receives DMX values from three sources and converts dedicated DMX channels into direction + enable control for left and right curtains.
+DMX512 curtain controller for an ESP8266.
+It lets you open, close, and stop two curtain motors from DMX.
 
 ![Assembly](images/Assembly.jpg)
 
-## Overview
+## User Guide
+- Use it to control two curtains from DMX.
+- It supports physical DMX, Art-Net, and sACN.
+- It works with standard lighting software, hardware controllers, or legacy DMX consoles.
+
+## Supported Hardware
+- The curtain controller is designed to pilot 2 [Mottura Power 571/1 motors](https://mottura.com/en/products/power/).
+- The curtain motor is pulse-controlled: a pulse in the open or close direction starts motion, and a pulse in the opposite direction stops it.
+
+## Quick Facts
+- Two curtains are supported.
+- Direct DMX control uses dedicated channels for left and right curtains.
+- Percentage DMX control uses dedicated channels for curtain position.
+- Direct mode has priority over percentage mode when both are present.
+
+## Technical Reference
+### Control Mapping
 - Two-pin control per curtain:
   - Left: `LEFT_CURTAIN_ENABLE_PIN` + `LEFT_CURTAIN_DIRECTION_PIN`
   - Right: `RIGHT_CURTAIN_ENABLE_PIN` + `RIGHT_CURTAIN_DIRECTION_PIN`
@@ -12,15 +29,11 @@ DMX512 controller for an ESP8266 that drives two curtain motors using GPIO outpu
   - `0..84` = rewind
   - `85..170` = stop (motor disabled)
   - `171..255` = forward
-- **Three input sources supported:**
-  - Physical **XLR DMX connector** (via RS485 transceiver)
-  - **Art-Net** over Wi-Fi
-  - **sACN (E1.31)** over Wi-Fi
-- Curtain can be driven from standard lighting software, controllers, or legacy DMX consoles.
 
-## Configuration
-- Set `LEFT_CURTAIN_DMX_CHANNEL` and `RIGHT_CURTAIN_DMX_CHANNEL` to the DMX slots you want.
-- Set left/right pin defines in [SHELLY-ESP-DMX.ino](SHELLY-ESP-DMX.ino) to match your relay module wiring.
+### Configuration
+- Set `LEFT_CURTAIN_DMX_CHANNEL` and `RIGHT_CURTAIN_DMX_CHANNEL` for direct open/close control.
+- Set `LEFT_CURTAIN_PERCENT_DMX_CHANNEL` and `RIGHT_CURTAIN_PERCENT_DMX_CHANNEL` for percentage-based positioning.
+- Set left/right pin defines in [Curtain-ESP-DMX.ino](Curtain-ESP-DMX.ino) to match your relay module wiring.
 - Wi-Fi and network settings still come from [LXDMXWiFiConfig.cpp](LXDMXWiFiConfig.cpp).
 
 ## Bill of Materials
@@ -112,7 +125,7 @@ RIGHT CURTAIN: Use D5 (ENABLE) + D6 (DIRECTION) same configuration
                                 false); // directionForwardHigh = false
   ```
 
-## Curtain Integration
+### Curtain Integration
 - **Dry Contact Relay Design**: The interlocked relay approach using dry contacts is motor-agnostic. It works with:
   - AC or DC motors (any voltage/frequency your relay is rated for)
   - Brushed or brushless motors
@@ -126,23 +139,30 @@ RIGHT CURTAIN: Use D5 (ENABLE) + D6 (DIRECTION) same configuration
 - Left and right control outputs should each drive an interlocked relay pair.
 - Verify active-high/active-low behavior for your board. If needed, edit constructor options in [SHELLY-ESP-DMX.ino](SHELLY-ESP-DMX.ino).
 
-## Software Behavior
-- **DMX channels:** `LEFT_CURTAIN_DMX_CHANNEL` and `RIGHT_CURTAIN_DMX_CHANNEL` (defaults: `510` and `511`)
-- **DMX mapping**
+### Software Behavior
+- **DMX channels:** direct control uses `LEFT_CURTAIN_DMX_CHANNEL` and `RIGHT_CURTAIN_DMX_CHANNEL` (defaults: `510` and `511`)
+- **DMX channels:** percentage control uses `LEFT_CURTAIN_PERCENT_DMX_CHANNEL` and `RIGHT_CURTAIN_PERCENT_DMX_CHANNEL` (defaults: `508` and `509`)
+- **Priority:** direct mode has priority over percentage mode when both are present.
+- **Direct DMX mapping**
   - `0..84` = rewind
   - `85..170` = stop
   - `171..255` = forward
+- **Percentage DMX mapping**
+  - `0` = fully closed
+  - `255` = fully open
+  - The sketch estimates curtain position from elapsed motor runtime, so set `CURTAIN_TRAVEL_TIME_MS` to match your hardware.
+  - Because there is no position feedback, the estimate is only as good as the last calibrated start point.
 - **Input modes**
   - Art-Net or sACN over Wi-Fi (unicast or multicast)
   - Physical DMX via RS485 serial input
   - Wi-Fi and physical DMX can be active simultaneously; highest value wins (HTP merge)
 - **Failsafe**
-  - Curtain movement is disabled in the stop DMX zone
+  - Curtain movement is disabled in the stop DMX zone for direct control
 
-## Direction Mapping
+### Direction Mapping
 The current code interprets lower DMX values as rewind and higher values as forward. If your motor direction is opposite, swap relay wiring or invert direction logic in [CurtainController.h](CurtainController.h).
 
-## Input Source Priority
+### Input Source Priority
 
 When multiple input sources provide DMX values simultaneously, the sketch uses **HTP (Highest Takes Precedence)** merging:
 - If any source sends a non-zero value, the highest value is used.

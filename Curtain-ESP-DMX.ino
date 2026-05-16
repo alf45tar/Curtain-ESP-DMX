@@ -66,16 +66,90 @@
 // - *_ENABLE_PIN: enables motor power
 // - *_DIRECTION_PIN: selects forward/rewind direction
 
+#define LEFT_CURTAIN_PERCENT_DMX_CHANNEL   508
+#define RIGHT_CURTAIN_PERCENT_DMX_CHANNEL  509
 #define LEFT_CURTAIN_DMX_CHANNEL  510
 #define RIGHT_CURTAIN_DMX_CHANNEL 511
 
+#define CURTAIN_TRAVEL_TIME_MS 30000UL
+
 #define LEFT_CURTAIN_ENABLE_PIN     D1
-#define LEFT_CURTAIN_DIRECTION_PIN  D2
+#define LEFT_CURTAIN_DIRECTION_PIN  D4
 #define RIGHT_CURTAIN_ENABLE_PIN    D5
 #define RIGHT_CURTAIN_DIRECTION_PIN D6
 
-CurtainController leftCurtain(LEFT_CURTAIN_ENABLE_PIN, LEFT_CURTAIN_DIRECTION_PIN);
-CurtainController rightCurtain(RIGHT_CURTAIN_ENABLE_PIN, RIGHT_CURTAIN_DIRECTION_PIN);
+CurtainController leftCurtain(LEFT_CURTAIN_ENABLE_PIN, LEFT_CURTAIN_DIRECTION_PIN, true, true, CURTAIN_TRAVEL_TIME_MS);
+CurtainController rightCurtain(RIGHT_CURTAIN_ENABLE_PIN, RIGHT_CURTAIN_DIRECTION_PIN, true, true, CURTAIN_TRAVEL_TIME_MS);
+
+extern LXWiFiArtNet* artNetInterface;
+extern LXWiFiSACN*   sACNInterface;
+
+struct CurtainDMXState {
+  byte directValue = 0;
+  byte percentValue = 0;
+};
+
+void captureCurtainDMX(CurtainDMXState* leftState, CurtainDMXState* rightState, int channel, byte value) {
+  if (channel == LEFT_CURTAIN_DMX_CHANNEL) {
+    leftState->directValue = value;
+  } else if (channel == LEFT_CURTAIN_PERCENT_DMX_CHANNEL) {
+    leftState->percentValue = value;
+  } else if (channel == RIGHT_CURTAIN_DMX_CHANNEL) {
+    rightState->directValue = value;
+  } else if (channel == RIGHT_CURTAIN_PERCENT_DMX_CHANNEL) {
+    rightState->percentValue = value;
+  }
+}
+
+void applyCurtainDMX(const CurtainDMXState& leftState, const CurtainDMXState& rightState) {
+  // Priority: direct if it changed this frame, otherwise percentage if it changed.
+  // Controllers track dirty flags to detect actual value changes.
+  
+  // Left curtain:
+  leftCurtain.setPercentageDMXValue(leftState.percentValue);
+  leftCurtain.setDMXValue(leftState.directValue);
+  
+  // Right curtain:
+  rightCurtain.setPercentageDMXValue(rightState.percentValue);
+  rightCurtain.setDMXValue(rightState.directValue);
+}
+
+void updateCurtainControllersFromPhysicalDMX(int slots) {
+  CurtainDMXState leftState;
+  CurtainDMXState rightState;
+
+  for (int i = 1; i <= slots; i++) {
+    captureCurtainDMX(&leftState, &rightState, i, ESP8266DMX.getSlot(i));
+  }
+
+  applyCurtainDMX(leftState, rightState);
+}
+
+void updateCurtainControllersFromMergedDMX(uint16_t a_slots, uint16_t s_slots) {
+  CurtainDMXState leftState;
+  CurtainDMXState rightState;
+
+  int channels[] = {
+    LEFT_CURTAIN_DMX_CHANNEL,
+    LEFT_CURTAIN_PERCENT_DMX_CHANNEL,
+    RIGHT_CURTAIN_DMX_CHANNEL,
+    RIGHT_CURTAIN_PERCENT_DMX_CHANNEL
+  };
+
+  for (unsigned int index = 0; index < sizeof(channels) / sizeof(channels[0]); index++) {
+    int channel = channels[index];
+    bool aPresent = channel <= a_slots;
+    bool sPresent = channel <= s_slots;
+
+    if (aPresent || sPresent) {
+      uint8_t a = aPresent ? artNetInterface->getSlot(channel) : 0;
+      uint8_t s = sPresent ? sACNInterface->getSlot(channel) : 0;
+      captureCurtainDMX(&leftState, &rightState, channel, (a > s) ? a : s);
+    }
+  }
+
+  applyCurtainDMX(leftState, rightState);
+}
 
 /*
  *  To allow use of the configuration utility, uncomment the following statement
@@ -383,14 +457,9 @@ void checkInput(LXDMXWiFi* interface, WiFiUDP* iUDP, uint8_t multicast) {
   if ( got_dmx ) {
     interface->setNumberOfSlots(got_dmx);     // set slots & copy to interface
     for(int i=1; i<=got_dmx; i++) {
-      if (i == LEFT_CURTAIN_DMX_CHANNEL) {
-        leftCurtain.setDMXValue(ESP8266DMX.getSlot(i));
-      }
-      if (i == RIGHT_CURTAIN_DMX_CHANNEL) {
-        rightCurtain.setDMXValue(ESP8266DMX.getSlot(i));
-      }
       interface->setSlot(i, ESP8266DMX.getSlot(i));
     }
+    updateCurtainControllersFromPhysicalDMX(got_dmx);
     if ( multicast ) {
       interface->sendDMX(iUDP, DMXWiFiConfig.inputAddress(), WiFi.localIP());
     } else {
@@ -424,18 +493,11 @@ void copyDMXToOutput(void) {
     }
     if ( a > s ) {
         ESP8266DMX.setSlot(i , a);
-        if (i == LEFT_CURTAIN_DMX_CHANNEL)
-          leftCurtain.setDMXValue(a);
-        if (i == RIGHT_CURTAIN_DMX_CHANNEL)
-          rightCurtain.setDMXValue(a);
       } else {
         ESP8266DMX.setSlot(i , s);
-        if (i == LEFT_CURTAIN_DMX_CHANNEL)
-          leftCurtain.setDMXValue(s);
-        if (i == RIGHT_CURTAIN_DMX_CHANNEL)
-          rightCurtain.setDMXValue(s);
       }
    }
+   updateCurtainControllersFromMergedDMX(a_slots, s_slots);
 }
 
 /************************************************************************
@@ -445,32 +507,7 @@ void copyDMXToOutput(void) {
 *************************************************************************/
 
 void copyDMXToCurtainControllers(void) {
-  uint8_t a, s;
-  uint16_t a_slots = artNetInterface->numberOfSlots();
-  uint16_t s_slots = sACNInterface->numberOfSlots();
-  for (int i=1; i <=DMX_UNIVERSE_SIZE; i++) {
-    if ( i <= a_slots ) {
-      a = artNetInterface->getSlot(i);
-    } else {
-      a = 0;
-    }
-    if ( i <= s_slots ) {
-      s = sACNInterface->getSlot(i);
-    } else {
-      s = 0;
-    }
-    if ( a > s ) {
-        if (i == LEFT_CURTAIN_DMX_CHANNEL)
-          leftCurtain.setDMXValue(a);
-        if (i == RIGHT_CURTAIN_DMX_CHANNEL)
-          rightCurtain.setDMXValue(a);
-      } else {
-        if (i == LEFT_CURTAIN_DMX_CHANNEL)
-          leftCurtain.setDMXValue(s);
-        if (i == RIGHT_CURTAIN_DMX_CHANNEL)
-          rightCurtain.setDMXValue(s);
-      }
-   }
+  updateCurtainControllersFromMergedDMX(artNetInterface->numberOfSlots(), sACNInterface->numberOfSlots());
 }
 
 /************************************************************************
