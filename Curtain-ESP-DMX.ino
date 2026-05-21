@@ -74,7 +74,7 @@
 #define CURTAIN_TRAVEL_TIME_MS 30000UL
 
 #define LEFT_CURTAIN_ENABLE_PIN     D1
-#define LEFT_CURTAIN_DIRECTION_PIN  D4
+#define LEFT_CURTAIN_DIRECTION_PIN  D2
 #define RIGHT_CURTAIN_ENABLE_PIN    D5
 #define RIGHT_CURTAIN_DIRECTION_PIN D6
 
@@ -102,9 +102,6 @@ void captureCurtainDMX(CurtainDMXState* leftState, CurtainDMXState* rightState, 
 }
 
 void applyCurtainDMX(const CurtainDMXState& leftState, const CurtainDMXState& rightState) {
-  // Priority: direct if it changed this frame, otherwise percentage if it changed.
-  // Controllers track dirty flags to detect actual value changes.
-  
   // Left curtain:
   leftCurtain.setPercentageDMXValue(leftState.percentValue);
   leftCurtain.setDMXValue(leftState.directValue);

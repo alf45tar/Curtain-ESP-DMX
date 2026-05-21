@@ -1,16 +1,14 @@
-#pragma once
+#ifndef CURTAIN_CONTROLLER_H
+#define CURTAIN_CONTROLLER_H
 
 #include <Arduino.h>
 
 class CurtainController {
 public:
-    // Two ways to drive the curtain:
-    // - DIRECT_MOTION uses a single DMX value with center stop.
-    // - PERCENTAGE_POSITION uses a time-based position estimate.
     enum Motion : uint8_t {
         STOP = 0,
-        FORWARD,
-        REWIND
+        FORWARD, // Increments position towards 100%
+        REWIND   // Decrements position towards 0%
     };
 
     enum ControlMode : uint8_t {
@@ -18,356 +16,299 @@ public:
         PERCENTAGE_POSITION
     };
 
-    // enablePin drives the motor relay, directionPin selects forward/reverse.
-    // fullTravelTimeMs should match the real end-to-end travel time.
-    // endpointResyncHoldMs gives the curtain extra time to settle at 0%/100%.
+    // Constructor
     CurtainController(uint8_t enablePin, uint8_t directionPin,
                       bool enableActiveHigh = true,
                       bool directionForwardHigh = true,
                       uint32_t fullTravelTimeMs = 30000UL,
                       uint32_t endpointResyncHoldMs = 2000UL)
-        : enablePin(enablePin), directionPin(directionPin),
-          enableActiveHigh(enableActiveHigh),
-          directionForwardHigh(directionForwardHigh),
-          fullTravelTimeMs(fullTravelTimeMs),
-          endpointResyncHoldMs(endpointResyncHoldMs) {}
+        : _enablePin(enablePin),
+          _directionPin(directionPin),
+          _enableActiveHigh(enableActiveHigh),
+          _directionForwardHigh(directionForwardHigh),
+          _fullTravelTimeMs(fullTravelTimeMs),
+          _endpointResyncHoldMs(endpointResyncHoldMs),
+          _currentMode(DIRECT_MOTION),
+          _currentMotion(STOP),
+          _targetMotion(STOP),
+          _pulseState(IDLE),
+          _calculatedPosition(0.0f),
+          _currentPosition(0),
+          _targetPosition(0),
+          _isSettling(false),
+          _motorStartTimestampMs(0),
+          _motorStartPosPercentage(0.0f),
+          _stateTimerMs(0),
+          _endpointTimerTriggered(false),
+          _lastRawDMXDirect(255),  // Initialized out-of-band to force first-run processing
+          _lastRawDMXPercent(255) // Initialized out-of-band to force first-run processing
+          {}
 
+    // Core Methods
     void begin() {
-        // Configure outputs and reset all runtime state.
-        pinMode(enablePin, OUTPUT);
-        pinMode(directionPin, OUTPUT);
-
-        applyMotion(STOP);
-
-        currentPositionPercent = 0;
-        targetPositionPercent = 0;
-        motionStartPercent = 0;
-        motionStartMillis = millis();
-        dirtyDirect = false;
-        dirtyPercent = false;
-        currentMotion = STOP;
-        controlMode = DIRECT_MOTION;
+        pinMode(_enablePin, OUTPUT);
+        pinMode(_directionPin, OUTPUT);
+        
+        // Safely pull pins to their logical offline/inactive state
+        writeHardwarePins(STOP, false);
     }
 
-    // One-channel control with center stop:
-    // 0..84 = rewind, 85..170 = stop, 171..255 = forward.
     void setDMXValue(byte value) {
-        // Direct mode only cares about the latest DMX value.
-        if (value != dmxValue) {
-            controlMode = DIRECT_MOTION;
-            dmxValue = value;
-            dirtyDirect = true;
+        // Exit early if value has not modified since the previous cycle
+        if (value == _lastRawDMXDirect) return;
+        
+        _lastRawDMXDirect = value;
+        _currentMode = DIRECT_MOTION;
+        _isSettling = false; // Direct manual override breaks out of positional settle locks
+        
+        Motion manualCommand = STOP;
+        if (value <= 84) {
+            manualCommand = REWIND;
+        } else if (value >= 171) {
+            manualCommand = FORWARD;
+        } else {
+            manualCommand = STOP;
         }
-        lastDMXMillis = millis();
+        
+        initiateTransition(manualCommand);
     }
 
-    // Percentage control:
-    // 0 = fully closed, 100 = fully open.
-    // The class estimates position from run time, so it needs a calibrated
-    // full travel time to make percentage moves accurate.
     void setPercentageDMXValue(byte value) {
-        // Percentage mode updates the target position, not the motor directly.
-        uint8_t nextPositionPercent = dmxValueToPercent(value);
-        if (nextPositionPercent != targetPositionPercent) {
-            controlMode = PERCENTAGE_POSITION;
-            targetPositionPercent = nextPositionPercent;
-            dirtyPercent = true;
+        // Exit early if value has not modified since the previous cycle
+        if (value == _lastRawDMXPercent) return;
+        
+        _lastRawDMXPercent = value;
+        _currentMode = PERCENTAGE_POSITION;
+        
+        // Ignore updates if system is waiting out its physical braking/settle cycle
+        if (_isSettling) return;
+
+        // Map 0...255 dynamically to 0...100%
+        uint8_t newTarget = (uint16_t)(value * 100) / 255;
+        
+        // Hysteresis Filter Evaluation while at rest
+        if (_currentMotion == STOP) {
+            int16_t variance = (int16_t)newTarget - (int16_t)_currentPosition;
+            if (abs(variance) <= 3) { // 3% static dead-band
+                return; 
+            }
         }
-        lastDMXMillis = millis();
+        
+        if (_targetPosition != newTarget) {
+            _targetPosition = newTarget;
+            _endpointTimerTriggered = false; // Reset the trigger flag for endpoint timing syncs
+        }
     }
 
     void update() {
-        // Keep the state machine simple: the selected mode controls the update path.
-        servicePulseSequence();
-        refreshPositionEstimate();
-
-        if (pulsePhase != PULSE_NONE) {
-            return;
+        // 1. Process physical time movement tracking
+        updatePositionTracking();
+        
+        // 2. Handle closed-loop tracking targets in percentage mode
+        if (_currentMode == PERCENTAGE_POSITION && !_isSettling) {
+            
+            if (_currentPosition == _targetPosition) {
+                // If target is an absolute physical boundary, let the state machine run out its over-travel timer
+                if (_targetPosition == 100 || _targetPosition == 0) {
+                    if (_currentMotion == STOP) {
+                        // Already finished completely sync-stopping at absolute edge boundary
+                        _targetPosition = _currentPosition;
+                    }
+                } 
+                // Intermediate positions (1%-99%) execution stop rule
+                else if (_currentMotion != STOP) {
+                    initiateTransition(STOP);
+                    _isSettling = true; // Settle Lock engaged until sequence un-jams relays
+                }
+            } 
+            // Initiate motion toward target if not yet met
+            else {
+                Motion requiredMotion = (_targetPosition > _currentPosition) ? FORWARD : REWIND;
+                initiateTransition(requiredMotion);
+            }
         }
-
-        switch (controlMode) {
-            case DIRECT_MOTION:
-                updateDirectMode();
-                break;
-            case PERCENTAGE_POSITION:
-                updatePercentageMode();
-                break;
-        }
+        
+        // 3. Tick Pulse State Machine kernel
+        processPulseStateMachine();
     }
-
-    Motion getMotion() const {
-        return currentMotion;
-    }
-
-    bool isDirectDirty() const {
-        return dirtyDirect;
-    }
-
-    bool isPercentDirty() const {
-        return dirtyPercent;
-    }
-
-    void clearDirectDirty() {
-        dirtyDirect = false;
-    }
-
-    void clearPercentDirty() {
-        dirtyPercent = false;
-    }
+    
+    // Getters
+    uint8_t getCurrentPosition() const { return _currentPosition; }
+    Motion getMotion() const { return _currentMotion; }
 
 private:
-    // Hardware wiring and motion calibration.
-    uint8_t enablePin;
-    uint8_t directionPin;
-    bool enableActiveHigh;
-    bool directionForwardHigh;
-    uint32_t fullTravelTimeMs;
-
-    // Last received DMX values and the estimated curtain state.
-    byte dmxValue = 127;
-    uint8_t targetPositionPercent = 0;
-    uint8_t currentPositionPercent = 0;
-    uint8_t motionStartPercent = 0;
-    bool dirtyDirect = false;      // Set when direct DMX value changes
-    bool dirtyPercent = false;     // Set when percentage DMX value changes
-    unsigned long lastDMXMillis = 0;
-    unsigned long motionStartMillis = 0;
-    ControlMode controlMode = DIRECT_MOTION;
-    Motion currentMotion = STOP;
-    // Additional time to stay active after the fader reaches an endpoint.
-    uint32_t endpointResyncHoldMs;
-    uint32_t pulseDurationMs = 500UL;
-    uint32_t reverseGapMs = 500UL;
-    unsigned long pulseStartMillis = 0;
-    unsigned long reverseGapStartMillis = 0;
-    Motion pulseMotion = STOP;
-    Motion pendingMotion = STOP;
-
-    enum PulsePhase : uint8_t {
-        PULSE_NONE = 0,
+    // Internal Hardware Pulse States
+    enum PulseState : uint8_t {
+        IDLE,
         PULSE_START,
+        RUNNING,
         PULSE_STOP,
-        PULSE_REVERSE_GAP
+        PULSE_REVERSE
     };
 
-    PulsePhase pulsePhase = PULSE_NONE;
+    // Hardware Pins
+    uint8_t _enablePin;
+    uint8_t _directionPin;
+    
+    // Logic Configuration Flags
+    bool _enableActiveHigh;
+    bool _directionForwardHigh;
 
-    Motion motionFromDMX(byte value) const {
-        // The middle third is stop; the low and high ends map to motion.
-        if (value <= 84) {
-            return REWIND;
-        }
-        if (value >= 171) {
-            return FORWARD;
-        }
-        return STOP;
-    }
+    // Timing Configuration Constraints
+    uint32_t _fullTravelTimeMs;
+    uint32_t _endpointResyncHoldMs;
 
-    uint8_t dmxValueToPercent(byte value) const {
-        // Convert the 0-255 DMX value into a 0-100 target position.
-        return (uint32_t)value * 100UL / 255UL;
-    }
+    // Runtime State Variables
+    ControlMode _currentMode;
+    Motion _currentMotion;
+    Motion _targetMotion;      
+    PulseState _pulseState;
+    
+    float _calculatedPosition; 
+    uint8_t _currentPosition;  
+    uint8_t _targetPosition;   
+    
+    bool _isSettling;          
+    
+    // Total Accumulation Safe Precision Markers
+    uint32_t _motorStartTimestampMs;
+    float _motorStartPosPercentage;
+    
+    // Time Tracking Stamps
+    uint32_t _stateTimerMs;
+    bool _endpointTimerTriggered;
 
-    void refreshPositionEstimate() {
-        // Estimate position from elapsed runtime while the motor is moving.
-        if (currentMotion == STOP || fullTravelTimeMs == 0) {
-            return;
-        }
+    // Change Detection History Trackers
+    byte _lastRawDMXDirect;
+    byte _lastRawDMXPercent;
 
-        unsigned long elapsed = millis() - motionStartMillis;
-        if (elapsed >= fullTravelTimeMs) {
-            currentPositionPercent = (currentMotion == REWIND) ? 100 : 0;
-            return;
-        }
-
-        uint8_t traveledPercent = (uint32_t)elapsed * 100UL / fullTravelTimeMs;
-        if (currentMotion == REWIND) {
-            uint16_t nextPosition = motionStartPercent + traveledPercent;
-            currentPositionPercent = nextPosition > 100 ? 100 : (uint8_t)nextPosition;
+    // Private Helper Functions
+    void writeHardwarePins(Motion motionState, bool enableMotor) {
+        bool pinDirectionValue = false;
+        if (motionState == FORWARD) {
+            pinDirectionValue = _directionForwardHigh;
+        } else if (motionState == REWIND) {
+            pinDirectionValue = !_directionForwardHigh;
         } else {
-            currentPositionPercent = (traveledPercent >= motionStartPercent)
-                ? 0
-                : (uint8_t)(motionStartPercent - traveledPercent);
+            pinDirectionValue = false; 
+        }
+        
+        bool pinEnableValue = enableMotor ? _enableActiveHigh : !_enableActiveHigh;
+        
+        digitalWrite(_directionPin, pinDirectionValue ? HIGH : LOW);
+        digitalWrite(_enablePin, pinEnableValue ? HIGH : LOW);
+    }
+
+    void initiateTransition(Motion nextMotion) {
+        if (_targetMotion == nextMotion) return;
+        
+        _targetMotion = nextMotion;
+        
+        if (_pulseState == IDLE && _targetMotion != STOP) {
+            _pulseState = PULSE_START;
+            _stateTimerMs = millis();
+            
+            // Log structural step reference point before motor begins applying mechanical energy
+            _motorStartTimestampMs = _stateTimerMs; 
+            _motorStartPosPercentage = _calculatedPosition;
+        } else if (_pulseState == RUNNING && _targetMotion != _currentMotion) {
+            _pulseState = PULSE_STOP;
+            _stateTimerMs = millis();
         }
     }
 
-    void startMotion(Motion motion) {
-        // Capture the current estimated position before changing direction.
-        applyMotion(motion);
-        if (motion != STOP) {
-            motionStartPercent = currentPositionPercent;
-            motionStartMillis = millis();
-        }
-    }
-
-    void writeEnable(bool enabled) {
-        uint8_t level = enabled ? (enableActiveHigh ? HIGH : LOW)
-                                : (enableActiveHigh ? LOW : HIGH);
-        digitalWrite(enablePin, level);
-    }
-
-    void writeDirection(Motion motion) {
-        bool forward = (motion == FORWARD);
-        uint8_t level = forward ? (directionForwardHigh ? HIGH : LOW)
-                                : (directionForwardHigh ? LOW : HIGH);
-        digitalWrite(directionPin, level);
-    }
-
-    void startEnablePulse(Motion motion) {
-        writeDirection(motion);
-        writeEnable(true);
-        pulsePhase = PULSE_START;
-        pulseMotion = motion;
-        pulseStartMillis = millis();
-        currentMotion = motion;
-    }
-
-    void startStopPulse(Motion motion) {
-        writeDirection(oppositeMotion(motion));
-        writeEnable(true);
-        pulsePhase = PULSE_STOP;
-        pulseMotion = motion;
-        pulseStartMillis = millis();
-    }
-
-    void startReverseGap(Motion motion) {
-        pendingMotion = motion;
-        reverseGapStartMillis = millis();
-        pulsePhase = PULSE_REVERSE_GAP;
-    }
-
-    Motion oppositeMotion(Motion motion) const {
-        return (motion == FORWARD) ? REWIND : FORWARD;
-    }
-
-    void applyMotion(Motion motion) {
-        if (motion == STOP) {
-            if (currentMotion != STOP && pulsePhase == PULSE_NONE) {
-                // Stop by setting the opposite direction, then pulsing enable.
-                startStopPulse(currentMotion);
+    void updatePositionTracking() {
+        if (_currentMotion != STOP && _pulseState == RUNNING) {
+            uint32_t currentRunDuration = millis() - _motorStartTimestampMs;
+            float projectedDelta = ((float)currentRunDuration / (float)_fullTravelTimeMs) * 100.0f;
+            
+            if (_currentMotion == FORWARD) {
+                _calculatedPosition = _motorStartPosPercentage + projectedDelta;
+                if (_calculatedPosition > 100.0f) _calculatedPosition = 100.0f;
+            } else if (_currentMotion == REWIND) {
+                _calculatedPosition = _motorStartPosPercentage - projectedDelta;
+                if (_calculatedPosition < 0.0f) _calculatedPosition = 0.0f;
             }
-            digitalWrite(directionPin, LOW);
-            return;
-        }
-
-        // If already moving in the same direction, no new pulse is needed.
-        if (currentMotion == motion && pulsePhase == PULSE_NONE) {
-            return;
-        }
-
-        // If a pulse sequence is already running, let update() finish it.
-        if (pulsePhase != PULSE_NONE) {
-            pendingMotion = motion;
-            return;
-        }
-
-        // Was stopped -> set direction first, then pulse enable to start moving.
-        if (currentMotion == STOP) {
-            startEnablePulse(motion);
-            return;
-        }
-
-        // If reversing direction, stop first and let the queued motion start after the gap.
-        if (currentMotion != motion) {
-            startReverseGap(motion);
-            startStopPulse(currentMotion);
+            
+            _currentPosition = (uint8_t)(_calculatedPosition + 0.5f); // Safe Rounding
         }
     }
 
-    void servicePulseSequence() {
-        unsigned long now = millis();
-
-        if (pulsePhase == PULSE_NONE) {
-            return;
-        }
-
-        if ((pulsePhase == PULSE_START || pulsePhase == PULSE_STOP) &&
-            (now - pulseStartMillis >= pulseDurationMs)) {
-            writeEnable(false);
-            digitalWrite(directionPin, LOW);
-
-            if (pulsePhase == PULSE_STOP) {
-                currentMotion = STOP;
-                if (pendingMotion != STOP && pendingMotion != pulseMotion) {
-                    startReverseGap(pendingMotion);
-                } else {
-                    pendingMotion = STOP;
-                    pulsePhase = PULSE_NONE;
+    void processPulseStateMachine() {
+        uint32_t currentTimeMs = millis();
+        const uint32_t PULSE_DURATION_MS = 500UL;
+        
+        switch (_pulseState) {
+            case IDLE:
+                writeHardwarePins(STOP, false);
+                _currentMotion = STOP;
+                break;
+                
+            case PULSE_START:
+                _currentMotion = _targetMotion;
+                writeHardwarePins(_currentMotion, true);
+                
+                if (currentTimeMs - _stateTimerMs >= PULSE_DURATION_MS) {
+                    _pulseState = RUNNING;
+                    // Reset track timing window baseline specifically for runtime updates
+                    _motorStartTimestampMs = currentTimeMs;
                 }
-            } else {
-                pulsePhase = PULSE_NONE;
-            }
-            return;
-        }
-
-        if (pulsePhase == PULSE_REVERSE_GAP &&
-            (now - reverseGapStartMillis >= reverseGapMs)) {
-            Motion motion = pendingMotion;
-            pendingMotion = STOP;
-            pulsePhase = PULSE_NONE;
-            startEnablePulse(motion);
-        }
-    }
-
-    void updateDirectMode() {
-        // Direct mode reacts only when the DMX value changes.
-        refreshPositionEstimate();
-
-        if (!dirtyDirect) {
-            return;
-        }
-
-        Motion target = motionFromDMX(dmxValue);
-        if (target == currentMotion) {
-            applyMotion(target);
-        } else {
-            startMotion(target);
-        }
-        dirtyDirect = false;
-        dirtyPercent = false;
-    }
-
-    void updatePercentageMode() {
-        // Percentage mode keeps adjusting toward the latest target position.
-        refreshPositionEstimate();
-
-        unsigned long elapsed = millis() - motionStartMillis;
-        bool targetIsEndpoint = (targetPositionPercent == 0) || (targetPositionPercent == 100);
-        dirtyPercent = false;
-
-        bool reachedTarget = false;
-        if (currentMotion == REWIND) {
-            reachedTarget = (currentPositionPercent >= targetPositionPercent);
-        } else if (currentMotion == FORWARD) {
-            reachedTarget = (currentPositionPercent <= targetPositionPercent);
-        }
-
-        if (reachedTarget) {
-            if (currentMotion != STOP) {
-                // At the end stops, hold the motor on a little longer so the
-                // estimate can catch up with the real curtain position.
-                if (targetIsEndpoint && elapsed < (fullTravelTimeMs + endpointResyncHoldMs)) {
-                    return;
+                break;
+                
+            case RUNNING:
+                writeHardwarePins(_currentMotion, true);
+                
+                if (_currentMode == DIRECT_MOTION) {
+                    _targetPosition = _currentPosition;
+                } 
+                else if (_currentMode == PERCENTAGE_POSITION) {
+                    if ((_currentMotion == FORWARD && _targetPosition == 100 && _currentPosition == 100) ||
+                        (_currentMotion == REWIND && _targetPosition == 0 && _currentPosition == 0)) {
+                        
+                        // Capture the exact moment we strike the physical boundary line limit
+                        if (!_endpointTimerTriggered) {
+                            _stateTimerMs = currentTimeMs;
+                            _endpointTimerTriggered = true;
+                        }
+                        
+                        // Clean run down over-travel cycle safely
+                        if (currentTimeMs - _stateTimerMs >= _endpointResyncHoldMs) {
+                            initiateTransition(STOP);
+                        }
+                    }
                 }
-
-                currentPositionPercent = targetPositionPercent;
-                // Don't stop at endpoints - let hardware limit stop the motor naturally
-                if (!targetIsEndpoint) {
-                    applyMotion(STOP);
-                    currentMotion = STOP;
+                break;
+                
+            case PULSE_STOP:
+                {
+                    Motion counterBrakeDirection = (_currentMotion == FORWARD) ? REWIND : FORWARD;
+                    writeHardwarePins(counterBrakeDirection, true);
                 }
-            }
-            return;
-        }
-
-        Motion desiredMotion = (targetPositionPercent > currentPositionPercent) ? REWIND : FORWARD;
-        if (currentMotion == STOP) {
-            startMotion(desiredMotion);
-            return;
-        }
-
-        if (currentMotion != desiredMotion) {
-            startMotion(desiredMotion);
+                
+                if (currentTimeMs - _stateTimerMs >= PULSE_DURATION_MS) {
+                    writeHardwarePins(STOP, false); 
+                    _currentMotion = STOP;
+                    _pulseState = PULSE_REVERSE;
+                    _stateTimerMs = currentTimeMs;
+                }
+                break;
+                
+            case PULSE_REVERSE:
+                writeHardwarePins(STOP, false);
+                
+                if (currentTimeMs - _stateTimerMs >= PULSE_DURATION_MS) {
+                    _isSettling = false; 
+                    
+                    if (_targetMotion != STOP) {
+                        _pulseState = PULSE_START; 
+                    } else {
+                        _pulseState = IDLE;
+                    }
+                    _stateTimerMs = currentTimeMs;
+                }
+                break;
         }
     }
 };
+
+#endif // CURTAIN_CONTROLLER_H
