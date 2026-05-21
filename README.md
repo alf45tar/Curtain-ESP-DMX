@@ -1,4 +1,4 @@
-# DMX Curtain Controller
+# DMX Stage Curtain Controller
 
 DMX512 curtain controller for an ESP8266.
 It lets you open, close, and stop two curtain motors from DMX.
@@ -18,7 +18,8 @@ It lets you open, close, and stop two curtain motors from DMX.
 - Two curtains are supported.
 - Direct DMX control uses dedicated channels for left and right curtains.
 - Percentage DMX control uses dedicated channels for curtain position.
-- Direct mode has priority over percentage mode when both are present.
+- DMX enable uses DMX channel 507 to drive a dedicated output pin that enables DMX curtain control.
+- Direct mode has priority over percentage mode when both change in the same update cycle (see the Direct vs Percentage Channel Mapping section).
 
 ## Technical Reference
 ### Control Mapping
@@ -29,6 +30,22 @@ It lets you open, close, and stop two curtain motors from DMX.
   - `0..84` = rewind
   - `85..170` = stop (motor disabled)
   - `171..255` = forward
+
+### DMX Curtain Enable
+
+- `DMX_CURTAIN_ENABLE_DMX_CHANNEL` is `507`.
+- `DMX_CURTAIN_ENABLE_PIN` is `D7`.
+- When the DMX value on channel 507 is `0..127`, the pin is driven `LOW` (DMX control disabled).
+- When the DMX value on channel 507 is `128..255`, the pin is driven `HIGH` (DMX control enabled).
+- Use this output to gate or enable DMX curtain control on external hardware (e.g., an enable input on a remote-control interface).
+
+#### Direct vs Percentage Channel Mapping
+
+- **Direct channels**: `LEFT_CURTAIN_DMX_CHANNEL` and `RIGHT_CURTAIN_DMX_CHANNEL` are interpreted as motion commands (rewind/stop/forward) using the `0..84 / 85..170 / 171..255` ranges.
+- **Percentage channels**: `LEFT_CURTAIN_PERCENT_DMX_CHANNEL` and `RIGHT_CURTAIN_PERCENT_DMX_CHANNEL` map `0..255` to `0..100%` and set a target position estimate used by the closed-loop logic in `CurtainController`.
+- **Default precedence**: the sketch currently calls `setPercentageDMXValue()` first, then `setDMXValue()` in `applyCurtainDMX()` (in [Curtain-ESP-DMX.ino](Curtain-ESP-DMX.ino)). Because of this call order, a direct channel update will switch the controller to `DIRECT_MOTION` and override a percentage-based target when both change in the same cycle.
+- **Change precedence**: to make percentage mode take priority instead, swap the call order inside `applyCurtainDMX()` so `setDMXValue()` runs before `setPercentageDMXValue()`, or centralize the decision in a new mapping function.
+- **Where to look in code**: see `CurtainController::setDMXValue()` and `CurtainController::setPercentageDMXValue()` in [CurtainController.h](CurtainController.h) and the caller `applyCurtainDMX()` in [Curtain-ESP-DMX.ino](Curtain-ESP-DMX.ino).
 
 ### Configuration
 - Set `LEFT_CURTAIN_DMX_CHANNEL` and `RIGHT_CURTAIN_DMX_CHANNEL` for direct open/close control.
@@ -43,19 +60,22 @@ It lets you open, close, and stop two curtain motors from DMX.
 | D1 Mini ProtoBoard     | 1        | Optional mounting board |
 | Female XLR 3 pins      | 1        | DMX input |
 | MAX3485                | 1        | RS485 transceiver |
-| Interlocked relays     | 1 set    | Forward/rewind motor switching |
-| LEDs + resistors       | optional | Status indicators |
+| 1 Relay Module         | 1        | |
+| 4 Relays Module        | 1        | Interlocked wiring for forward/rewind switching |
+| 5V 1A Power Supply.    | 1        | Power supply for Wemos board and relays boards |
 
 ## Wiring
 | Wemos D1 Mini Pin | Function | Notes |
 |-------------------|----------|-------|
-| `D3` | `DIRECTION_PIN` | DMX direction control |
 | `D1` | `LEFT_CURTAIN_ENABLE_PIN` | Left curtain relay enable output |
 | `D2` | `LEFT_CURTAIN_DIRECTION_PIN` | Left curtain forward/rewind select |
+| `D3` | `DIRECTION_PIN` | DMX direction control |
+| `D4` | `BUILTIN_LED` | Built-in led and serial DMX output |
 | `D5` | `RIGHT_CURTAIN_ENABLE_PIN` | Right curtain relay enable output |
 | `D6` | `RIGHT_CURTAIN_DIRECTION_PIN` | Right curtain forward/rewind select |
+| `D7` | `DMX_CURTAIN_ENABLE_PIN` | Manual override enable output driven by DMX channel 507 |
 | `RX` | DMX input | Serial DMX via RS485 receiver |
-| `TX` | DMX output | Optional serial DMX output |
+| `TX` | `STARTUP_MODE_PIN` | Force default setup when LOW on boot |
 
 # Schematic
 
@@ -81,41 +101,84 @@ Wemos D1 Mini                                                  DMX connector
 ## Interlocked Relay Wiring
 
 Each curtain requires one interlocked relay pair.
+One additonal relay is used to switch between standard remote controller to DMX stage curtain controller.
 
 ```
-LEFT CURTAIN CONTROL (example)
-
+                   FROM REMOTE CONTROLLER                                 TO CURTAIN MOTOR
+        --------------------------------------------        -----------------------------------------------
+           LEFT CURTAIN              RIGHT CURTAIN             LEFT CURTAIN              RIGHT CURTAIN
+         OPEN  COM  CLOSE          OPEN  COM  CLOSE          OPEN  COM  CLOSE          OPEN  COM  CLOSE
+           +    +    +               +    +    +               +    +    +               +    +    +  
+           |    |    |               |    |    |               |    |    |               |    |    |
+           |    |    |               |    |    |               |    |    |               |    |    |
+           |    |    +---------------------------------------------------+               |    |    |
+           |    |                    |    |    |               |    |    |               |    |    |
+           +---------------------------------------------------+    |    |               |    |    |
+                |                    |    |    |               |    |    |               |    |    |
+                |                    |    |    +---------------------------------------------------+
+                |                    |    |                    |    |    |               |    |    |
+                |                    +---------------------------------------------------+    |    |
+                |                         |                    |    |    |               |    |    |
+                +-------------------------+                    |    |    |               |    |    |
+                                          |                    |    |    |               |    |    |
+                                          |                    |    |    |               |    |    |
+                                          |                    |    |    |               |    |    |
+                     +---------------+    |                    |    |    |               |    |    |
+                     |       +--- NC |----+                    |    |    |               |    |    |
+                     |        \      |                         |    |    |               |    |    |
+           D7  ------| IN      + COM |------------------------------+-------------------------+    |
+                     |               |                         |         |               |         |
+                     |       +--- NO |-----------------+       |         |               |         |
+                     +---------------+                 |       |         |               |         |
+                                                       |       |         |               |         |
+                                                       |       |         |               |         |
+                                                       |       |         |               |         |
+                                                       |       |         |               |         |
+                     +---------------+                 |       |         |               |         |
+                     |       +--- NC |------           |       |         |               |         |
+                     |        \      |                 |       |         |               |         |
+           D1  ------| IN1     + COM |-----------------+       |         |               |         |
+                     |               |                 |       |         |               |         |
+                     |       +--- NO |-----------+     |       |         |               |         |
+                     +---------------+           |     |       |         |               |         |
+                                                 |     |       |         |               |         |
+                                                 |     |       |         |               |         |
+                     +---------------+           |     |       |         |               |         |
+                     |       +--- NC |-------------------------+         |               |         |
+                     |        \      |           |     |                 |               |         |
+           D2  ------| IN2     + COM |-----------+     |                 |               |         |
+                     |               |                 |                 |               |         |
+                     |       +--- NO |-----------------------------------+               |         |
+                     +---------------+                 |                                 |         |
+                                                       |                                 |         |
+                     +---------------+                 |                                 |         |
+                     |       +--- NC |------           |                                 |         |
+                     |        \      |                 |                                 |         |
+           D5  ------| IN3     + COM |-----------------+                                 |         |
+                     |               |                                                   |         |
+                     |       +--- NO |-------------+                                     |         |
+                     +---------------+             |                                     |         |
+                                                   |                                     |         |
+                                                   |                                     |         |
+                     +---------------+             |                                     |         |
+                     |       +--- NC |---------------------------------------------------+         |
+                     |        \      |             |                                               |
+           D6  ------| IN4     + COM |-------------+                                               |
+                     |               |                                                             |
+                     |       +--- NO |-------------------------------------------------------------+
                      +---------------+
-          3V3  ------| VCC   +--- NC |------  (not connected)
-                     |        \      |
-   ENABLE_PIN  ------| IN      + COM |------  COM
-                     |               |
-          GND  ------| GND   +--- NO |-----------------+
-                     +---------------+                 |
-                                                       |
-                                                       |
-                     +---------------+                 |
-          3V3  ------| VCC   +--- NC |------  OPEN     |
-                     |        \      |                 |
-DIRECTION_PIN  ------| IN      + COM |-----------------+
-                     |               |
-          GND  ------| GND   +--- NO |------  CLOSE
-                     +---------------+
 
 
-STATE TABLE:
-┌─────────────┬────────────────┬─────────┬────────────────┐
-│ ENABLE_PIN  │ DIRECTION_PIN  │ Motion  │ Curtain State  │
-├─────────────┼────────────────┼─────────┼────────────────┤
-│ LOW (OFF)   │    -           │ STOP    │ AS IS          │
-│ HIGH (ON)   │ LOW            │ REWIND  │ OPEN           │
-│ HIGH (ON)   │ HIGH           │ FORWARD │ CLOSE          │
-└─────────────┴────────────────┴─────────┴────────────────┘
 
-RIGHT CURTAIN: Use D5 (ENABLE) + D6 (DIRECTION) same configuration
+     Power Supply          Wemos D1 Mini          4 Relays Board           1 Relay Board
+        5V 1A                5V    GND               VCC   GND               VCC   GND
+                              +     +                 +     +                 +    +
+                              |     |                 |     |                 |    |
+          VCC  ---------------+-----------------------+-----------------------+    |
+                                    |                       |                      |
+          GND  ---------------------+-----------------------+----------------------+
+
 ```
-
-
 
 ### Active-High vs Active-Low:
 - If relays activate when GPIO is LOW, invert the logic in [CurtainController.h](CurtainController.h) constructor:
@@ -137,11 +200,12 @@ RIGHT CURTAIN: Use D5 (ENABLE) + D6 (DIRECTION) same configuration
 - Use relay hardware that guarantees forward and rewind cannot be active at the same time.
 - Each curtain needs one enable input and one direction input on your relay hardware.
 - Left and right control outputs should each drive an interlocked relay pair.
-- Verify active-high/active-low behavior for your board. If needed, edit constructor options in [SHELLY-ESP-DMX.ino](SHELLY-ESP-DMX.ino).
+- Verify active-high/active-low behavior for your board. If needed, edit constructor options in [Curtain-ESP-DMX.ino](Curtain-ESP-DMX.ino).
 
 ### Software Behavior
 - **DMX channels:** direct control uses `LEFT_CURTAIN_DMX_CHANNEL` and `RIGHT_CURTAIN_DMX_CHANNEL` (defaults: `510` and `511`)
 - **DMX channels:** percentage control uses `LEFT_CURTAIN_PERCENT_DMX_CHANNEL` and `RIGHT_CURTAIN_PERCENT_DMX_CHANNEL` (defaults: `508` and `509`)
+- **DMX channels:** DMX enable uses `DMX_CURTAIN_ENABLE_DMX_CHANNEL` (default: `507`)
 - **Priority:** direct mode has priority over percentage mode when both are present.
 - **Direct DMX mapping**
   - `0..84` = rewind
@@ -157,7 +221,7 @@ RIGHT CURTAIN: Use D5 (ENABLE) + D6 (DIRECTION) same configuration
   - Physical DMX via RS485 serial input
   - Wi-Fi and physical DMX can be active simultaneously; highest value wins (HTP merge)
 - **Failsafe**
-  - Curtain movement is disabled in the stop DMX zone for direct control
+  - In direct control, the stop DMX zone sends a brief opposite-direction pulse to stop the motor
 
 ### Direction Mapping
 The current code interprets lower DMX values as rewind and higher values as forward. If your motor direction is opposite, swap relay wiring or invert direction logic in [CurtainController.h](CurtainController.h).

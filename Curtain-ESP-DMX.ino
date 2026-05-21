@@ -66,17 +66,19 @@
 // - *_ENABLE_PIN: enables motor power
 // - *_DIRECTION_PIN: selects forward/rewind direction
 
+#define DMX_CURTAIN_ENABLE_DMX_CHANNEL 507
 #define LEFT_CURTAIN_PERCENT_DMX_CHANNEL   508
 #define RIGHT_CURTAIN_PERCENT_DMX_CHANNEL  509
 #define LEFT_CURTAIN_DMX_CHANNEL  510
 #define RIGHT_CURTAIN_DMX_CHANNEL 511
 
-#define CURTAIN_TRAVEL_TIME_MS 30000UL
+#define CURTAIN_TRAVEL_TIME_MS 20000UL
 
 #define LEFT_CURTAIN_ENABLE_PIN     D1
 #define LEFT_CURTAIN_DIRECTION_PIN  D2
 #define RIGHT_CURTAIN_ENABLE_PIN    D5
 #define RIGHT_CURTAIN_DIRECTION_PIN D6
+#define DMX_CURTAIN_ENABLE_PIN      D7
 
 CurtainController leftCurtain(LEFT_CURTAIN_ENABLE_PIN, LEFT_CURTAIN_DIRECTION_PIN, true, true, CURTAIN_TRAVEL_TIME_MS);
 CurtainController rightCurtain(RIGHT_CURTAIN_ENABLE_PIN, RIGHT_CURTAIN_DIRECTION_PIN, true, true, CURTAIN_TRAVEL_TIME_MS);
@@ -89,6 +91,12 @@ struct CurtainDMXState {
   byte percentValue = 0;
 };
 
+void captureDMXEnable(byte* dmxEnableState, int channel, byte value) {
+  if (channel == DMX_CURTAIN_ENABLE_DMX_CHANNEL) {
+    *dmxEnableState = value;
+  }
+}
+
 void captureCurtainDMX(CurtainDMXState* leftState, CurtainDMXState* rightState, int channel, byte value) {
   if (channel == LEFT_CURTAIN_DMX_CHANNEL) {
     leftState->directValue = value;
@@ -99,6 +107,10 @@ void captureCurtainDMX(CurtainDMXState* leftState, CurtainDMXState* rightState, 
   } else if (channel == RIGHT_CURTAIN_PERCENT_DMX_CHANNEL) {
     rightState->percentValue = value;
   }
+}
+
+void applyDMXEnable(byte value) {
+  digitalWrite(DMX_CURTAIN_ENABLE_PIN, (value < 128) ? LOW : HIGH);
 }
 
 void applyCurtainDMX(const CurtainDMXState& leftState, const CurtainDMXState& rightState) {
@@ -114,19 +126,24 @@ void applyCurtainDMX(const CurtainDMXState& leftState, const CurtainDMXState& ri
 void updateCurtainControllersFromPhysicalDMX(int slots) {
   CurtainDMXState leftState;
   CurtainDMXState rightState;
+  byte dmxEnableState = 0;
 
   for (int i = 1; i <= slots; i++) {
     captureCurtainDMX(&leftState, &rightState, i, ESP8266DMX.getSlot(i));
+    captureDMXEnable(&dmxEnableState, i, ESP8266DMX.getSlot(i));
   }
 
+  applyDMXEnable(dmxEnableState);
   applyCurtainDMX(leftState, rightState);
 }
 
 void updateCurtainControllersFromMergedDMX(uint16_t a_slots, uint16_t s_slots) {
   CurtainDMXState leftState;
   CurtainDMXState rightState;
+  byte dmxEnableState = 0;
 
   int channels[] = {
+    DMX_CURTAIN_ENABLE_DMX_CHANNEL,
     LEFT_CURTAIN_DMX_CHANNEL,
     LEFT_CURTAIN_PERCENT_DMX_CHANNEL,
     RIGHT_CURTAIN_DMX_CHANNEL,
@@ -141,10 +158,14 @@ void updateCurtainControllersFromMergedDMX(uint16_t a_slots, uint16_t s_slots) {
     if (aPresent || sPresent) {
       uint8_t a = aPresent ? artNetInterface->getSlot(channel) : 0;
       uint8_t s = sPresent ? sACNInterface->getSlot(channel) : 0;
+      if (channel == DMX_CURTAIN_ENABLE_DMX_CHANNEL) {
+        dmxEnableState = (a > s) ? a : s;
+      }
       captureCurtainDMX(&leftState, &rightState, channel, (a > s) ? a : s);
     }
   }
 
+  applyDMXEnable(dmxEnableState);
   applyCurtainDMX(leftState, rightState);
 }
 
@@ -233,6 +254,8 @@ void setup() {
   pinMode(BUILTIN_LED, OUTPUT);
   pinMode(STARTUP_MODE_PIN, INPUT_PULLUP);
   pinMode(DIRECTION_PIN, OUTPUT);
+  pinMode(DMX_CURTAIN_ENABLE_PIN, OUTPUT);
+  digitalWrite(DMX_CURTAIN_ENABLE_PIN, LOW);
 
 #ifdef USE_REMOTE_CONFIG
   uint8_t bootStatus = DMXWiFiConfig.begin(digitalRead(STARTUP_MODE_PIN));	// uses settings from persistent memory unless pin is low.
