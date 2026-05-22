@@ -1,57 +1,40 @@
 # DMX Stage Curtain Controller
 
 DMX512 curtain controller for an ESP8266.
-It lets you open, close, and stop two curtain motors from DMX.
+It lets you open, close, and stop two curtain motors indipendently from DMX, Art-Net and sACN.
 
 ![Assembly](images/Assembly.jpg)
 
-## User Guide
+## Key Feautures
 - Use it to control two curtains from DMX.
 - It supports physical DMX, Art-Net, and sACN.
 - It works with standard lighting software, hardware controllers, or legacy DMX consoles.
+- Direct mode: dedicated DMX channels give immediate open/stop/close control.
+- Percentage mode: set a target position (0–100%) and the controller moves the curtain there.
+- Manual bypass/Enable: a separate DMX channel can enable or disable DMX control so a local/manual remote can take over.
+- Priority: direct commands take precedence over percentage targets when both change in the same update cycle.
 
 ## Supported Hardware
-- The curtain controller is designed to pilot 2 [Mottura Power 571/1 motors](https://mottura.com/en/products/power/).
-- The curtain motor is pulse-controlled: a pulse in the open or close direction starts motion, and a pulse in the opposite direction stops it.
+- Designed for [Mottura Power 571/1 motors](https://mottura.com/en/products/power/) curtain motors.
+- The motor remote interface is a 3-wire dry-contact remote: `CLOSE`, `COM`, `OPEN`. Motion is activated by short circuit CLOSE and COM or OPEN and COM. The controller emulates this by switching the `CLOSE` or `OPEN` contact to `COM` via relays.
+- The curtain motor is pulse-controlled: a short pulse in the open or close direction starts motion up to next intermediate endpoint, and a pulse in the opposite direction stops it. A long pulse open/close the curtain completely regardless of presets.
+- Pulse-controlled motors respond to momentary dry-contact closures. A directional pulse starts motion in that direction; applying the opposite-direction pulse stops (or reverses) motion depending on timing and wiring.
+- Short pulse: used to step toward an intermediate preset.
+- Long pulse: bypass presets and run until a physical end-stop or a STOP command is received.
+- For percentage-mode position estimation, set `CURTAIN_TRAVEL_TIME_MS` to match full-travel runtime.
+- Use interlocked relay pairs so forward and rewind contacts cannot be energized at the same time.
+- Motor power must be powered independently of the ESP8266; the ESP only switches dry contacts.
 
-## Quick Facts
-- Two curtains are supported.
-- Direct DMX control uses dedicated channels for left and right curtains.
-- Percentage DMX control uses dedicated channels for curtain position.
-- DMX enable uses DMX channel 507 to drive a dedicated output pin that enables DMX curtain control.
-- Direct mode has priority over percentage mode when both change in the same update cycle (see the Direct vs Percentage Channel Mapping section).
+## DMX Channel Reference
+| Channel | Symbol | Purpose | Values |
+|--------:|--------|:--------|:-------|
+| 507 | `DMX_CURTAIN_ENABLE_DMX_CHANNEL` | DMX controller enable | `0..127` = disabled, `128..255` = enabled |
+| 508 | `LEFT_CURTAIN_PERCENT_DMX_CHANNEL` | Left curtain percentage target | `0..255` → `0%..100%` (0 = open, 255 = close) |
+| 509 | `RIGHT_CURTAIN_PERCENT_DMX_CHANNEL` | Right curtain percentage target | `0..255` → `0%..100%` |
+| 510 | `LEFT_CURTAIN_DMX_CHANNEL` | Left curtain direct (open/stop/close) | `0..84` = rewind, `85..170` = stop, `171..255` = forward |
+| 511 | `RIGHT_CURTAIN_DMX_CHANNEL` | Right curtain direct (open/stop/close) | same 3-zone mapping as left |
 
-## Technical Reference
-### Control Mapping
-- Two-pin control per curtain:
-  - Left: `LEFT_CURTAIN_ENABLE_PIN` + `LEFT_CURTAIN_DIRECTION_PIN`
-  - Right: `RIGHT_CURTAIN_ENABLE_PIN` + `RIGHT_CURTAIN_DIRECTION_PIN`
-- DMX mapping uses a center stop zone:
-  - `0..84` = rewind
-  - `85..170` = stop (motor disabled)
-  - `171..255` = forward
-
-### DMX Curtain Enable
-
-- `DMX_CURTAIN_ENABLE_DMX_CHANNEL` is `507`.
-- `DMX_CURTAIN_ENABLE_PIN` is `D7`.
-- When the DMX value on channel 507 is `0..127`, the pin is driven `LOW` (DMX control disabled).
-- When the DMX value on channel 507 is `128..255`, the pin is driven `HIGH` (DMX control enabled).
-- Use this output to gate or enable DMX curtain control on external hardware (e.g., an enable input on a remote-control interface).
-
-#### Direct vs Percentage Channel Mapping
-
-- **Direct channels**: `LEFT_CURTAIN_DMX_CHANNEL` and `RIGHT_CURTAIN_DMX_CHANNEL` are interpreted as motion commands (rewind/stop/forward) using the `0..84 / 85..170 / 171..255` ranges.
-- **Percentage channels**: `LEFT_CURTAIN_PERCENT_DMX_CHANNEL` and `RIGHT_CURTAIN_PERCENT_DMX_CHANNEL` map `0..255` to `0..100%` and set a target position estimate used by the closed-loop logic in `CurtainController`.
-- **Default precedence**: the sketch currently calls `setPercentageDMXValue()` first, then `setDMXValue()` in `applyCurtainDMX()` (in [Curtain-ESP-DMX.ino](Curtain-ESP-DMX.ino)). Because of this call order, a direct channel update will switch the controller to `DIRECT_MOTION` and override a percentage-based target when both change in the same cycle.
-- **Change precedence**: to make percentage mode take priority instead, swap the call order inside `applyCurtainDMX()` so `setDMXValue()` runs before `setPercentageDMXValue()`, or centralize the decision in a new mapping function.
-- **Where to look in code**: see `CurtainController::setDMXValue()` and `CurtainController::setPercentageDMXValue()` in [CurtainController.h](CurtainController.h) and the caller `applyCurtainDMX()` in [Curtain-ESP-DMX.ino](Curtain-ESP-DMX.ino).
-
-### Configuration
-- Set `LEFT_CURTAIN_DMX_CHANNEL` and `RIGHT_CURTAIN_DMX_CHANNEL` for direct open/close control.
-- Set `LEFT_CURTAIN_PERCENT_DMX_CHANNEL` and `RIGHT_CURTAIN_PERCENT_DMX_CHANNEL` for percentage-based positioning.
-- Set left/right pin defines in [Curtain-ESP-DMX.ino](Curtain-ESP-DMX.ino) to match your relay module wiring.
-- Wi-Fi and network settings still come from [LXDMXWiFiConfig.cpp](LXDMXWiFiConfig.cpp).
+Note: direct (open/stop/close) commands take precedence over percentage targets when both change in the same update cycle.
 
 ## Bill of Materials
 | Item                   | Quantity | Notes |
@@ -60,17 +43,17 @@ It lets you open, close, and stop two curtain motors from DMX.
 | D1 Mini ProtoBoard     | 1        | Optional mounting board |
 | Female XLR 3 pins      | 1        | DMX input |
 | MAX3485                | 1        | RS485 transceiver |
-| 1 Relay Module         | 1        | |
-| 4 Relays Module        | 1        | Interlocked wiring for forward/rewind switching |
-| 5V 1A Power Supply.    | 1        | Power supply for Wemos board and relays boards |
+| 1 Relay Module 5V      | 1        | Manual bypass/enable |
+| 4 Relays Module 5V     | 1        | Interlocked wiring for forward/rewind switching |
+| 5V 1A Power Supply     | 1        | Power supply for Wemos board and relays boards |
 
-## Wiring
+## Pin Mapping
 | Wemos D1 Mini Pin | Function | Notes |
 |-------------------|----------|-------|
 | `D1` | `LEFT_CURTAIN_ENABLE_PIN` | Left curtain relay enable output |
 | `D2` | `LEFT_CURTAIN_DIRECTION_PIN` | Left curtain forward/rewind select |
 | `D3` | `DIRECTION_PIN` | DMX direction control |
-| `D4` | `BUILTIN_LED` | Built-in led and serial DMX output |
+| `D4` | `BUILTIN_LED` | Built-in led and DMX output |
 | `D5` | `RIGHT_CURTAIN_ENABLE_PIN` | Right curtain relay enable output |
 | `D6` | `RIGHT_CURTAIN_DIRECTION_PIN` | Right curtain forward/rewind select |
 | `D7` | `DMX_CURTAIN_ENABLE_PIN` | Manual override enable output driven by DMX channel 507 |
@@ -101,13 +84,17 @@ Wemos D1 Mini                                                  DMX connector
 ## Interlocked Relay Wiring
 
 Each curtain requires one interlocked relay pair.
-One additonal relay is used to switch between standard remote controller to DMX stage curtain controller.
+One additional relay is used to switch between the local remote controller and the DMX stage curtain controller.
+
+The local controller, curtain motor, and DMX controller are wired in parallel for the three motor lines, except for the COM wire. The bypass relay switches the motor COM between the local controller COM and the DMX controller path. When that relay is not energized, the local controller is active. When it is energized, the DMX controller takes over.
+
+For each curtain, `D1` and `D5` act as the COM transfer relays. They connect motor COM to the next pair of directional relays, which are driven by `D2` and `D6`.
 
 ```
-                   FROM REMOTE CONTROLLER                                 TO CURTAIN MOTOR
-        --------------------------------------------        -----------------------------------------------
-           LEFT CURTAIN              RIGHT CURTAIN             LEFT CURTAIN              RIGHT CURTAIN
-         OPEN  COM  CLOSE          OPEN  COM  CLOSE          OPEN  COM  CLOSE          OPEN  COM  CLOSE
+               FROM LOCAL REMOTE CONTROLLER                               TO CURTAIN MOTOR
+       --------------------------------------------        -----------------------------------------------
+          LEFT CURTAIN              RIGHT CURTAIN             LEFT CURTAIN             RIGHT CURTAIN
+        CLOSE  COM  OPEN          CLOSE  COM  OPEN          CLOSE  COM  OPEN          CLOSE  COM  OPEN
            +    +    +               +    +    +               +    +    +               +    +    +  
            |    |    |               |    |    |               |    |    |               |    |    |
            |    |    |               |    |    |               |    |    |               |    |    |
@@ -118,9 +105,9 @@ One additonal relay is used to switch between standard remote controller to DMX 
                 |                    |    |    +---------------------------------------------------+
                 |                    |    |                    |    |    |               |    |    |
                 |                    +---------------------------------------------------+    |    |
+                |                         |                    |    |    |               |    |    |                
                 |                         |                    |    |    |               |    |    |
                 +-------------------------+                    |    |    |               |    |    |
-                                          |                    |    |    |               |    |    |
                                           |                    |    |    |               |    |    |
                                           |                    |    |    |               |    |    |
                      +---------------+    |                    |    |    |               |    |    |
@@ -128,7 +115,7 @@ One additonal relay is used to switch between standard remote controller to DMX 
                      |        \      |                         |    |    |               |    |    |
            D7  ------| IN      + COM |------------------------------+-------------------------+    |
                      |               |                         |         |               |         |
-                     |       +--- NO |-----------------+       |         |               |         |
+         BYPASS      |       +--- NO |-----------------+       |         |               |         |
                      +---------------+                 |       |         |               |         |
                                                        |       |         |               |         |
                                                        |       |         |               |         |
@@ -141,14 +128,13 @@ One additonal relay is used to switch between standard remote controller to DMX 
                      |               |                 |       |         |               |         |
                      |       +--- NO |-----------+     |       |         |               |         |
                      +---------------+           |     |       |         |               |         |
-                                                 |     |       |         |               |         |
-                                                 |     |       |         |               |         |
+      LEFT CURTAIN                               |     |       |         |               |         |
                      +---------------+           |     |       |         |               |         |
-                     |       +--- NC |-------------------------+         |               |         |
-                     |        \      |           |     |                 |               |         |
-           D2  ------| IN2     + COM |-----------+     |                 |               |         |
-                     |               |                 |                 |               |         |
-                     |       +--- NO |-----------------------------------+               |         |
+                     |       +--- NC |-----------------------------------+               |         |
+                     |        \      |           |     |       |                         |         |
+           D2  ------| IN2     + COM |-----------+     |       |                         |         |
+                     |               |                 |       |                         |         |
+                     |       +--- NO |-------------------------+                         |         |
                      +---------------+                 |                                 |         |
                                                        |                                 |         |
                      +---------------+                 |                                 |         |
@@ -158,14 +144,13 @@ One additonal relay is used to switch between standard remote controller to DMX 
                      |               |                                                   |         |
                      |       +--- NO |-------------+                                     |         |
                      +---------------+             |                                     |         |
-                                                   |                                     |         |
-                                                   |                                     |         |
+      RIGHT CURTAIN                                |                                     |         |
                      +---------------+             |                                     |         |
-                     |       +--- NC |---------------------------------------------------+         |
-                     |        \      |             |                                               |
-           D6  ------| IN4     + COM |-------------+                                               |
-                     |               |                                                             |
-                     |       +--- NO |-------------------------------------------------------------+
+                     |       +--- NC |-------------------------------------------------------------+
+                     |        \      |             |                                     |
+           D6  ------| IN4     + COM |-------------+                                     |
+                     |               |                                                   |
+                     |       +--- NO |---------------------------------------------------+
                      +---------------+
 
 
@@ -187,8 +172,36 @@ One additonal relay is used to switch between standard remote controller to DMX 
                                 false,  // enableActiveHigh = false
                                 false); // directionForwardHigh = false
   ```
+**Firmware Update Warning:** Disconnect external 5V power before updating firmware. The board is powered by USB during programming; USB power and an external 5V supply must not be connected at the same time.
 
-### Curtain Integration
+
+## Technical Reference
+
+- Control mapping:
+  - Left curtain: `LEFT_CURTAIN_ENABLE_PIN` + `LEFT_CURTAIN_DIRECTION_PIN`
+  - Right curtain: `RIGHT_CURTAIN_ENABLE_PIN` + `RIGHT_CURTAIN_DIRECTION_PIN`
+  - Direct DMX channels use a 3-zone mapping: `0..84` = rewind, `85..170` = stop, `171..255` = forward.
+  - Percentage DMX channels map `0..255` → `0..100%` for target-position control.
+
+- Modes:
+  - Direct mode: immediate open/stop/close from direct DMX channels.
+  - Percentage mode: provide a target percent; controller estimates position by runtime and moves to that target.
+
+- Enable channel:
+  - `DMX_CURTAIN_ENABLE_DMX_CHANNEL` (default `507`) drives `DMX_CURTAIN_ENABLE_PIN` (default `D7`).
+  - Values `0..127` disable DMX control, `128..255` enable it.
+
+- Input sources and priority:
+  - Supported inputs: physical DMX (RS485), Art-Net, sACN.
+  - HTP (highest takes precedence) merging is used across sources.
+  - When both a direct command and a percentage target arrive in the same update, direct commands take precedence.
+
+- Configuration pointers:
+  - Channel and pin constants are in `Curtain-ESP-DMX.ino`.
+  - Position timing (`CURTAIN_TRAVEL_TIME_MS`) is used to convert motor runtime into percentage position and should match your hardware.
+
+
+## Curtain Integration
 - **Dry Contact Relay Design**: The interlocked relay approach using dry contacts is motor-agnostic. It works with:
   - AC or DC motors (any voltage/frequency your relay is rated for)
   - Brushed or brushless motors
@@ -201,38 +214,6 @@ One additonal relay is used to switch between standard remote controller to DMX 
 - Each curtain needs one enable input and one direction input on your relay hardware.
 - Left and right control outputs should each drive an interlocked relay pair.
 - Verify active-high/active-low behavior for your board. If needed, edit constructor options in [Curtain-ESP-DMX.ino](Curtain-ESP-DMX.ino).
-
-### Software Behavior
-- **DMX channels:** direct control uses `LEFT_CURTAIN_DMX_CHANNEL` and `RIGHT_CURTAIN_DMX_CHANNEL` (defaults: `510` and `511`)
-- **DMX channels:** percentage control uses `LEFT_CURTAIN_PERCENT_DMX_CHANNEL` and `RIGHT_CURTAIN_PERCENT_DMX_CHANNEL` (defaults: `508` and `509`)
-- **DMX channels:** DMX enable uses `DMX_CURTAIN_ENABLE_DMX_CHANNEL` (default: `507`)
-- **Priority:** direct mode has priority over percentage mode when both are present.
-- **Direct DMX mapping**
-  - `0..84` = rewind
-  - `85..170` = stop
-  - `171..255` = forward
-- **Percentage DMX mapping**
-  - `0` = fully closed
-  - `255` = fully open
-  - The sketch estimates curtain position from elapsed motor runtime, so set `CURTAIN_TRAVEL_TIME_MS` to match your hardware.
-  - Because there is no position feedback, the estimate is only as good as the last calibrated start point.
-- **Input modes**
-  - Art-Net or sACN over Wi-Fi (unicast or multicast)
-  - Physical DMX via RS485 serial input
-  - Wi-Fi and physical DMX can be active simultaneously; highest value wins (HTP merge)
-- **Failsafe**
-  - In direct control, the stop DMX zone sends a brief opposite-direction pulse to stop the motor
-
-### Direction Mapping
-The current code interprets lower DMX values as rewind and higher values as forward. If your motor direction is opposite, swap relay wiring or invert direction logic in [CurtainController.h](CurtainController.h).
-
-### Input Source Priority
-
-When multiple input sources provide DMX values simultaneously, the sketch uses **HTP (Highest Takes Precedence)** merging:
-- If any source sends a non-zero value, the highest value is used.
-- Physical XLR DMX, Art-Net, and sACN are all treated equally in the merge.
-
-This allows you to use multiple controllers at once (e.g., a physical console + software controller) without conflicts.
 
 ## Safety Notes
 - Curtain motors can pinch or jam if the travel range is not calibrated correctly.

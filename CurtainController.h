@@ -96,7 +96,6 @@ public:
         
         if (_targetPosition != newTarget) {
             _targetPosition = newTarget;
-            _endpointTimerTriggered = false; // Reset the trigger flag for endpoint timing syncs
         }
     }
 
@@ -108,10 +107,10 @@ public:
         if (_currentMode == PERCENTAGE_POSITION && !_isSettling) {
             
             if (_currentPosition == _targetPosition) {
-                // If target is an absolute physical boundary, let the state machine run out its over-travel timer
+                // Keep endpoint targets latched without issuing a stop pulse.
                 if (_targetPosition == 100 || _targetPosition == 0) {
                     if (_currentMotion == STOP) {
-                        // Already finished completely sync-stopping at absolute edge boundary
+                        // Already parked at the absolute edge boundary.
                         _targetPosition = _currentPosition;
                     }
                 } 
@@ -264,17 +263,8 @@ private:
                 else if (_currentMode == PERCENTAGE_POSITION) {
                     if ((_currentMotion == FORWARD && _targetPosition == 100 && _currentPosition == 100) ||
                         (_currentMotion == REWIND && _targetPosition == 0 && _currentPosition == 0)) {
-                        
-                        // Capture the exact moment we strike the physical boundary line limit
-                        if (!_endpointTimerTriggered) {
-                            _stateTimerMs = currentTimeMs;
-                            _endpointTimerTriggered = true;
-                        }
-                        
-                        // Clean run down over-travel cycle safely
-                        if (currentTimeMs - _stateTimerMs >= _endpointResyncHoldMs) {
-                            initiateTransition(STOP);
-                        }
+                        // Endpoint target already reached; keep the target synced without sending a stop pulse.
+                        _targetPosition = _currentPosition;
                     }
                 }
                 break;
