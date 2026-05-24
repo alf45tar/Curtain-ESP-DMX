@@ -18,8 +18,8 @@ public:
 
     // Constructor
     CurtainController(uint8_t enablePin, uint8_t directionPin,
-                      bool enableActiveHigh = true,
-                      bool directionForwardHigh = true,
+                      bool enableActiveHigh = false,
+                      bool directionForwardHigh = false,
                       uint32_t fullTravelTimeMs = 30000UL,
                       uint32_t endpointResyncHoldMs = 2000UL)
         : _enablePin(enablePin),
