@@ -91,89 +91,99 @@ The local controller, curtain motor, and DMX controller are wired in parallel fo
 For each curtain, `D1` and `D5` act as the COM transfer relays. They connect motor COM to the next pair of directional relays, which are driven by `D2` and `D6`.
 
 ```
-               FROM LOCAL REMOTE CONTROLLER                               TO CURTAIN MOTOR
-       --------------------------------------------        -----------------------------------------------
-          LEFT CURTAIN              RIGHT CURTAIN             LEFT CURTAIN             RIGHT CURTAIN
-        CLOSE  COM  OPEN          CLOSE  COM  OPEN          CLOSE  COM  OPEN          CLOSE  COM  OPEN
-           +    +    +               +    +    +               +    +    +               +    +    +  
-           |    |    |               |    |    |               |    |    |               |    |    |
-           |    |    |               |    |    |               |    |    |               |    |    |
-           |    |    +---------------------------------------------------+               |    |    |
-           |    |                    |    |    |               |    |    |               |    |    |
-           +---------------------------------------------------+    |    |               |    |    |
-                |                    |    |    |               |    |    |               |    |    |
-                |                    |    |    +---------------------------------------------------+
-                |                    |    |                    |    |    |               |    |    |
-                |                    +---------------------------------------------------+    |    |
-                |                         |                    |    |    |               |    |    |                
-                |                         |                    |    |    |               |    |    |
-                +-------------------------+                    |    |    |               |    |    |
-                                          |                    |    |    |               |    |    |
-                                          |                    |    |    |               |    |    |
-                     +---------------+    |                    |    |    |               |    |    |
-                     |       +--- NC |----+                    |    |    |               |    |    |
-                     |        \      |                         |    |    |               |    |    |
-           D7  ------| IN      + COM |------------------------------+-------------------------+    |
-                     |               |                         |         |               |         |
-         BYPASS      |       +--- NO |-----------------+       |         |               |         |
-                     +---------------+                 |       |         |               |         |
-                                                       |       |         |               |         |
-                                                       |       |         |               |         |
-                                                       |       |         |               |         |
-                                                       |       |         |               |         |
-                     +---------------+                 |       |         |               |         |
-                     |       +--- NC |------           |       |         |               |         |
-                     |        \      |                 |       |         |               |         |
-           D1  ------| IN1     + COM |-----------------+       |         |               |         |
-                     |               |                 |       |         |               |         |
-                     |       +--- NO |-----------+     |       |         |               |         |
-                     +---------------+           |     |       |         |               |         |
-      LEFT CURTAIN                               |     |       |         |               |         |
-                     +---------------+           |     |       |         |               |         |
-                     |       +--- NC |-----------------------------------+               |         |
-                     |        \      |           |     |       |                         |         |
-           D2  ------| IN2     + COM |-----------+     |       |                         |         |
-                     |               |                 |       |                         |         |
-                     |       +--- NO |-------------------------+                         |         |
-                     +---------------+                 |                                 |         |
-                                                       |                                 |         |
-                     +---------------+                 |                                 |         |
-                     |       +--- NC |------           |                                 |         |
-                     |        \      |                 |                                 |         |
-           D5  ------| IN3     + COM |-----------------+                                 |         |
-                     |               |                                                   |         |
-                     |       +--- NO |-------------+                                     |         |
-                     +---------------+             |                                     |         |
-      RIGHT CURTAIN                                |                                     |         |
-                     +---------------+             |                                     |         |
-                     |       +--- NC |-------------------------------------------------------------+
-                     |        \      |             |                                     |
-           D6  ------| IN4     + COM |-------------+                                     |
-                     |               |                                                   |
-                     |       +--- NO |---------------------------------------------------+
-                     +---------------+
+         FROM LOCAL REMOTE CONTROLLER                               TO CURTAIN MOTOR
+ --------------------------------------------        -----------------------------------------------
+    LEFT CURTAIN              RIGHT CURTAIN             LEFT CURTAIN             RIGHT CURTAIN
+  CLOSE  COM  OPEN          CLOSE  COM  OPEN          CLOSE  COM  OPEN          CLOSE  COM  OPEN
+     +    +    +               +    +    +               +    +    +               +    +    +  
+     |    |    |               |    |    |               |    |    |               |    |    |
+     |    |    |               |    |    |               |    |    |               |    |    |
+     |    |    +---------------------------------------------------+               |    |    |
+     |    |                    |    |    |               |    |    |               |    |    |
+     +---------------------------------------------------+    |    |               |    |    |
+          |                    |    |    |               |    |    |               |    |    |
+          |                    |    |    +---------------------------------------------------+
+          |                    |    |                    |    |    |               |    |    |
+          |                    +---------------------------------------------------+    |    |
+          |                         |                    |    |    |               |    |    |  
+          |                         |                    |    |    |               |    |    |
+          +-------------------------+                    |    |    |               |    |    |
+                                    |                    |    |    |               |    |    |
+                                    |                    |    |    |               |    |    |
+               +---------------+    |                    |    |    |               |    |    |
+               |       +--- NC |----+                    |    |    |               |    |    |
+               |        \      |                         |    |    |               |    |    |
+     D7  ------| IN      + COM |------------------------------+-------------------------+    |
+               |               |                         |         |               |         |
+   BYPASS      |       +--- NO |-----------------+       |         |               |         |
+               +---------------+                 |       |         |               |         |
+                                                 |       |         |               |         |
+                                                 |       |         |               |         |
+                                                 |       |         |               |         |
+                                                 |       |         |               |         |
+               +---------------+                 |       |         |               |         |
+               |       +--- NC |------           |       |         |               |         |
+               |        \      |                 |       |         |               |         |
+     D1  ------| IN1     + COM |-----------------+       |         |               |         |
+               |               |                 |       |         |               |         |
+               |       +--- NO |-----------+     |       |         |               |         |
+               +---------------+           |     |       |         |               |         |
+LEFT CURTAIN                               |     |       |         |               |         |
+               +---------------+           |     |       |         |               |         |
+               |       +--- NC |-----------------------------------+               |         |
+               |        \      |           |     |       |                         |         |
+     D2  ------| IN2     + COM |-----------+     |       |                         |         |
+               |               |                 |       |                         |         |
+               |       +--- NO |-------------------------+                         |         |
+               +---------------+                 |                                 |         |
+                                                 |                                 |         |
+               +---------------+                 |                                 |         |
+               |       +--- NC |------           |                                 |         |
+               |        \      |                 |                                 |         |
+     D5  ------| IN3     + COM |-----------------+                                 |         |
+               |               |                                                   |         |
+               |       +--- NO |-------------+                                     |         |
+               +---------------+             |                                     |         |
+RIGHT CURTAIN                                |                                     |         |
+               +---------------+             |                                     |         |
+               |       +--- NC |-------------------------------------------------------------+
+               |        \      |             |                                     |
+     D6  ------| IN4     + COM |-------------+                                     |
+               |               |                                                   |
+               |       +--- NO |---------------------------------------------------+
+               +---------------+
 
 
 
-     Power Supply          Wemos D1 Mini          4 Relays Board           1 Relay Board
-        5V 1A                5V    GND               VCC   GND               VCC   GND
-                              +     +                 +     +                 +    +
-                              |     |                 |     |                 |    |
-          VCC  ---------------+-----------------------+-----------------------+    |
-                                    |                       |                      |
-          GND  ---------------------+-----------------------+----------------------+
-
+Power Supply          Wemos D1 Mini          4 Relays Board           1 Relay Board
+   5V 1A                5V    GND               VCC   GND               VCC   GND
+                         +     +                 +     +                 +    +
+                         |     |                 |     |                 |    |
+     VCC  ---------------+-----------------------+-----------------------+    |
+                               |                       |                      |
+     GND  ---------------------+-----------------------+----------------------+
 ```
 
-### Active-High vs Active-Low:
-- If relays activate when GPIO is LOW, invert the logic in [CurtainController.h](CurtainController.h) constructor:
-  ```cpp
-  CurtainController leftCurtain(LEFT_CURTAIN_ENABLE_PIN, LEFT_CURTAIN_DIRECTION_PIN,
-                                false,  // enableActiveHigh = false
-                                false); // directionForwardHigh = false
-  ```
-**Firmware Update Warning:** Disconnect external 5V power before updating firmware. The board is powered by USB during programming; USB power and an external 5V supply must not be connected at the same time.
+## Compile Instructions
+1. Download and install the Arduino IDE from https://www.arduino.cc/en/software.
+2. Install the ESP8266 board package in Arduino IDE:
+  - On macOS, open `Arduino IDE > Settings...`.
+  - On Windows, open `File > Preferences`.
+  - Add this URL to `Additional Boards Manager URLs`:
+    `http://arduino.esp8266.com/stable/package_esp8266com_index.json`
+  - Open `Tools > Board > Boards Manager`, search for `esp8266`, and install `esp8266 by ESP8266 Community`.
+  - Select your ESP8266 board, such as `LOLIN(WEMOS) D1 mini (clone)`.
+3. Install the two required libraries used by this sketch:
+  - `LXESP8266DMX` from https://github.com/claudeheintz/LXESP8266DMX
+  - `LXDMXWiFi` from https://github.com/claudeheintz/LXDMXWiFi_Library
+4. Install each library in Arduino IDE:
+  - Download the ZIP file from each GitHub repository page.
+  - In Arduino IDE, choose `Sketch > Include Library > Add .ZIP Library...`.
+  - Select the `LXESP8266DMX` ZIP file, then repeat the same step for `LXDMXWiFi`.
+  - Restart Arduino IDE if the libraries do not appear immediately in `Sketch > Include Library`.
+5. Open `Curtain-ESP-DMX.ino` in Arduino IDE, then compile or upload the sketch.
 
+**Firmware Update Warning:** Disconnect the Wemos D1 mini board from the circuit before updating firmware. The board is powered by USB during programming, so external 5V power must not be connected at the same time, and the RX connection to the MAX3485 can interfere with flashing.
 
 ## Technical Reference
 
