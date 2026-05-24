@@ -1,11 +1,11 @@
-# DMX Stage Curtain Controller
+# 🎭 DMX Stage Curtain Controller
 
 DMX512 curtain controller for an ESP8266.
 It lets you open, close, and stop two curtain motors indipendently from DMX, Art-Net and sACN.
 
 ![Assembly](images/Assembly.jpg)
 
-## Key Feautures
+## 🔑 Key Features
 - Use it to control two curtains from DMX.
 - It supports physical DMX, Art-Net, and sACN.
 - It works with standard lighting software, hardware controllers, or legacy DMX consoles.
@@ -14,7 +14,7 @@ It lets you open, close, and stop two curtain motors indipendently from DMX, Art
 - Manual bypass/Enable: a separate DMX channel can enable or disable DMX control so a local/manual remote can take over.
 - Priority: direct commands take precedence over percentage targets when both change in the same update cycle.
 
-## Supported Hardware
+## 🔧 Supported Hardware
 - Designed for [Mottura Power 571/1 motors](https://mottura.com/en/products/power/) curtain motors.
 - The motor remote interface is a 3-wire dry-contact remote: `CLOSE`, `COM`, `OPEN`. Motion is activated by short circuit CLOSE and COM or OPEN and COM. The controller emulates this by switching the `CLOSE` or `OPEN` contact to `COM` via relays.
 - The curtain motor is pulse-controlled: a short pulse in the open or close direction starts motion up to next intermediate endpoint, and a pulse in the opposite direction stops it. A long pulse open/close the curtain completely regardless of presets.
@@ -25,7 +25,7 @@ It lets you open, close, and stop two curtain motors indipendently from DMX, Art
 - Use interlocked relay pairs so forward and rewind contacts cannot be energized at the same time.
 - Motor power must be powered independently of the ESP8266; the ESP only switches dry contacts.
 
-## DMX Channel Reference
+## 🔢 DMX Channel Reference
 | Channel | Symbol | Purpose | Values |
 |--------:|--------|:--------|:-------|
 | 507 | `DMX_CURTAIN_ENABLE_DMX_CHANNEL` | DMX controller enable | `0..127` = disabled, `128..255` = enabled |
@@ -36,18 +36,30 @@ It lets you open, close, and stop two curtain motors indipendently from DMX, Art
 
 Note: direct (open/stop/close) commands take precedence over percentage targets when both change in the same update cycle.
 
-## Bill of Materials
+## ✨ Wireless Art-Net & sACN Control
+The Curtain-ESP-DMX can receive DMX data **over Wi-Fi** using the **Art-Net** and **sACN (E1.31)** lighting network protocols.
+
+This enables full wireless integration with professional lighting software compatible with Art-Net/sACN.
+
+The ESP8266 receives Art-Net or sACN data and converts it internally into the pulse-based curtain control logic used in wired DMX mode — maintaining full backward compatibility.
+
+## ⚙️ Configuration with ESP-DMX-Configuration App
+All network and DMX parameters (Wi-Fi credentials, protocol selection, universe, etc.) can be configured using the **[ESP-DMX-Configuration](https://github.com/alf45tar/ESP-DMX-Configuration)** application.
+
+This app communicates directly with the device over **Wi-Fi**. No source code modification or re-compilation is required — all configuration can be done through the external app with the exception of DMX channels.
+
+## 📦 Bill of Materials
 | Item                   | Quantity | Notes |
 |------------------------|----------|-------|
 | Wemos D1 Mini or clone | 1        | ESP8266 host board |
-| D1 Mini ProtoBoard     | 1        | Optional mounting board |
 | Female XLR 3 pins      | 1        | DMX input |
+| Male XLR 3 pins        | 1        | DMX output (optional) |
 | MAX3485                | 1        | RS485 transceiver |
-| 1 Relay Module 5V      | 1        | Manual bypass/enable |
-| 4 Relays Module 5V     | 1        | Interlocked wiring for forward/rewind switching |
+| [1 Relay Module 5V](https://www.wemos.cc/en/latest/d1_mini_shield/relay.html)      | 1        | Manual bypass/enable |
+| [4 Relays Module 5V](http://wiki.sunfounder.cc/index.php?title=4_Channel_5V_Relay_Module)     | 1        | Interlocked wiring for forward/rewind switching |
 | 5V 1A Power Supply     | 1        | Power supply for Wemos board and relays boards |
 
-## Pin Mapping
+## 📌 Pin Mapping
 | Wemos D1 Mini Pin | Function | Notes |
 |-------------------|----------|-------|
 | `D1` | `LEFT_CURTAIN_ENABLE_PIN` | Left curtain relay enable output |
@@ -60,9 +72,9 @@ Note: direct (open/stop/close) commands take precedence over percentage targets 
 | `RX` | DMX input | Serial DMX via RS485 receiver |
 | `TX` | `STARTUP_MODE_PIN` | Force default setup when LOW on boot |
 
-# Schematic
+# 📐 Schematic
 
-## DMX connector wiring
+## 🔌 DMX connector wiring
 ```
 Wemos D1 Mini                                                  DMX connector
 
@@ -81,7 +93,7 @@ Wemos D1 Mini                                                  DMX connector
     GND  ---------------------------------------------+
 ```
 
-## Interlocked Relay Wiring
+## 🔁 Interlocked Relay Wiring
 
 Each curtain requires one interlocked relay pair.
 One additional relay is used to switch between the local remote controller and the DMX stage curtain controller.
@@ -95,7 +107,7 @@ For each curtain, `D1` and `D5` act as the COM transfer relays. They connect mot
  --------------------------------------------        -----------------------------------------------
     LEFT CURTAIN              RIGHT CURTAIN             LEFT CURTAIN             RIGHT CURTAIN
   CLOSE  COM  OPEN          CLOSE  COM  OPEN          CLOSE  COM  OPEN          CLOSE  COM  OPEN
-     +    +    +               +    +    +               +    +    +               +    +    +  
+     +    +    +               +    +    +               +    +    +               +    +    +
      |    |    |               |    |    |               |    |    |               |    |    |
      |    |    |               |    |    |               |    |    |               |    |    |
      |    |    +---------------------------------------------------+               |    |    |
@@ -105,7 +117,7 @@ For each curtain, `D1` and `D5` act as the COM transfer relays. They connect mot
           |                    |    |    +---------------------------------------------------+
           |                    |    |                    |    |    |               |    |    |
           |                    +---------------------------------------------------+    |    |
-          |                         |                    |    |    |               |    |    |  
+          |                         |                    |    |    |               |    |    |
           |                         |                    |    |    |               |    |    |
           +-------------------------+                    |    |    |               |    |    |
                                     |                    |    |    |               |    |    |
@@ -164,7 +176,7 @@ Power Supply          Wemos D1 Mini          4 Relays Board           1 Relay Bo
      GND  ---------------------+-----------------------+----------------------+
 ```
 
-## Compile Instructions
+## 🛠️ Compile Instructions
 1. Download and install the Arduino IDE from https://www.arduino.cc/en/software.
 2. Install the ESP8266 board package in Arduino IDE:
   - On macOS, open `Arduino IDE > Settings...`.
@@ -185,7 +197,7 @@ Power Supply          Wemos D1 Mini          4 Relays Board           1 Relay Bo
 
 **Firmware Update Warning:** Disconnect the Wemos D1 mini board from the circuit before updating firmware. The board is powered by USB during programming, so external 5V power must not be connected at the same time, and the RX connection to the MAX3485 can interfere with flashing.
 
-## Technical Reference
+## 📚 Technical Reference
 
 - Control mapping:
   - Left curtain: `LEFT_CURTAIN_ENABLE_PIN` + `LEFT_CURTAIN_DIRECTION_PIN`
@@ -211,21 +223,11 @@ Power Supply          Wemos D1 Mini          4 Relays Board           1 Relay Bo
   - Position timing (`CURTAIN_TRAVEL_TIME_MS`) is used to convert motor runtime into percentage position and should match your hardware.
 
 
-## Curtain Integration
-- **Dry Contact Relay Design**: The interlocked relay approach using dry contacts is motor-agnostic. It works with:
-  - AC or DC motors (any voltage/frequency your relay is rated for)
-  - Brushed or brushless motors
-  - Single-phase or three-phase industrial motors
-  - Stepper motors with external drivers
-  - Any curtain mechanism with forward/reverse control
-  - The ESP8266 only switches low-power control signals; motor power is entirely isolated.
+## 🧩 Curtain Integration
+- **Dry Contact Relay Design**: The interlocked relay approach using dry contacts is motor-agnostic. It can works with minimal or no changes in different scenario not tested by me.
+- The ESP8266 only switches low-power control signals; motor power is entirely isolated.
 
-- Use relay hardware that guarantees forward and rewind cannot be active at the same time.
-- Each curtain needs one enable input and one direction input on your relay hardware.
-- Left and right control outputs should each drive an interlocked relay pair.
-- Verify active-high/active-low behavior for your board. If needed, edit constructor options in [Curtain-ESP-DMX.ino](Curtain-ESP-DMX.ino).
-
-## Safety Notes
+## ⚠️ Safety Notes
 - Curtain motors can pinch or jam if the travel range is not calibrated correctly.
 - Double-check relay wiring and interlock behavior before powering on.
 - Verify that the curtain direction matches the DMX open/close mapping before using it in production.
