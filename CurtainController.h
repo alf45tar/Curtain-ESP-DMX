@@ -7,8 +7,8 @@ class CurtainController {
 public:
     enum Motion : uint8_t {
         STOP = 0,
-        FORWARD, // Increments position towards 100%
-        REWIND   // Decrements position towards 0%
+        FORWARD, // Opens the curtain
+        REWIND   // Closes the curtain
     };
 
     enum ControlMode : uint8_t {
@@ -17,17 +17,15 @@ public:
     };
 
     // Constructor
-    CurtainController(uint8_t enablePin, uint8_t directionPin,
-                      bool enableActiveHigh = false,
-                      bool directionForwardHigh = false,
-                      uint32_t fullTravelTimeMs = 30000UL,
-                      uint32_t endpointResyncHoldMs = 2000UL)
-        : _enablePin(enablePin),
-          _directionPin(directionPin),
-          _enableActiveHigh(enableActiveHigh),
-          _directionForwardHigh(directionForwardHigh),
+    CurtainController(uint8_t openPin, uint8_t closePin,
+                      bool relaysActiveHigh = false,
+                      uint32_t fullTravelTimeMs = 20000UL,
+                      uint32_t stopPulseMs = 100UL)
+        : _openPin(openPin),
+          _closePin(closePin),
+          _relaysActiveHigh(relaysActiveHigh),
           _fullTravelTimeMs(fullTravelTimeMs),
-          _endpointResyncHoldMs(endpointResyncHoldMs),
+          _stopPulseMs(stopPulseMs),
           _currentMode(DIRECT_MOTION),
           _currentMotion(STOP),
           _targetMotion(STOP),
@@ -39,17 +37,16 @@ public:
           _motorStartTimestampMs(0),
           _motorStartPosPercentage(0.0f),
           _stateTimerMs(0),
-          _endpointTimerTriggered(false),
           _lastRawDMXDirect(255),  // Initialized out-of-band to force first-run processing
           _lastRawDMXPercent(255) // Initialized out-of-band to force first-run processing
           {}
 
     // Core Methods
     void begin() {
-        pinMode(_enablePin, OUTPUT);
-        pinMode(_directionPin, OUTPUT);
+        pinMode(_openPin, OUTPUT);
+        pinMode(_closePin, OUTPUT);
         
-        // Safely pull pins to their logical offline/inactive state
+        // Safely pull relays to their logical offline/inactive state
         writeHardwarePins(STOP, false);
     }
 
@@ -107,17 +104,11 @@ public:
         if (_currentMode == PERCENTAGE_POSITION && !_isSettling) {
             
             if (_currentPosition == _targetPosition) {
-                // Keep endpoint targets latched without issuing a stop pulse.
-                if (_targetPosition == 100 || _targetPosition == 0) {
-                    if (_currentMotion == STOP) {
-                        // Already parked at the absolute edge boundary.
-                        _targetPosition = _currentPosition;
-                    }
-                } 
-                // Intermediate positions (1%-99%) execution stop rule
-                else if (_currentMotion != STOP) {
+                if (_currentMotion == STOP) {
+                    _targetPosition = _currentPosition;
+                } else {
                     initiateTransition(STOP);
-                    _isSettling = true; // Settle Lock engaged until sequence un-jams relays
+                    _isSettling = true; // Settle lock engaged until the stop pulse completes
                 }
             } 
             // Initiate motion toward target if not yet met
@@ -139,23 +130,20 @@ private:
     // Internal Hardware Pulse States
     enum PulseState : uint8_t {
         IDLE,
-        PULSE_START,
         RUNNING,
-        PULSE_STOP,
-        PULSE_REVERSE
+        STOP_PULSE
     };
 
     // Hardware Pins
-    uint8_t _enablePin;
-    uint8_t _directionPin;
+    uint8_t _openPin;
+    uint8_t _closePin;
     
     // Logic Configuration Flags
-    bool _enableActiveHigh;
-    bool _directionForwardHigh;
+    bool _relaysActiveHigh;
 
     // Timing Configuration Constraints
     uint32_t _fullTravelTimeMs;
-    uint32_t _endpointResyncHoldMs;
+    uint32_t _stopPulseMs;
 
     // Runtime State Variables
     ControlMode _currentMode;
@@ -175,27 +163,32 @@ private:
     
     // Time Tracking Stamps
     uint32_t _stateTimerMs;
-    bool _endpointTimerTriggered;
 
     // Change Detection History Trackers
     byte _lastRawDMXDirect;
     byte _lastRawDMXPercent;
 
     // Private Helper Functions
-    void writeHardwarePins(Motion motionState, bool enableMotor) {
-        bool pinDirectionValue = false;
-        if (motionState == FORWARD) {
-            pinDirectionValue = _directionForwardHigh;
+    void writeRelayPin(uint8_t pin, bool active) {
+        bool pinValue = _relaysActiveHigh ? active : !active;
+        digitalWrite(pin, pinValue ? HIGH : LOW);
+    }
+
+    void writeHardwarePins(Motion motionState, bool stopPulseActive) {
+        bool openRelayActive = false;
+        bool closeRelayActive = false;
+
+        if (stopPulseActive) {
+            openRelayActive = true;
+            closeRelayActive = true;
+        } else if (motionState == FORWARD) {
+            openRelayActive = true;
         } else if (motionState == REWIND) {
-            pinDirectionValue = !_directionForwardHigh;
-        } else {
-            pinDirectionValue = false; 
+            closeRelayActive = true;
         }
-        
-        bool pinEnableValue = enableMotor ? _enableActiveHigh : !_enableActiveHigh;
-        
-        digitalWrite(_directionPin, pinDirectionValue ? HIGH : LOW);
-        digitalWrite(_enablePin, pinEnableValue ? HIGH : LOW);
+
+        writeRelayPin(_openPin, openRelayActive);
+        writeRelayPin(_closePin, closeRelayActive);
     }
 
     void initiateTransition(Motion nextMotion) {
@@ -203,21 +196,29 @@ private:
         
         _targetMotion = nextMotion;
         
-        if (_pulseState == IDLE && _targetMotion != STOP) {
-            _pulseState = PULSE_START;
+        if (_pulseState == IDLE) {
+            if (_targetMotion == STOP) {
+                _currentMotion = STOP;
+                writeHardwarePins(STOP, false);
+                return;
+            }
+
+            _currentMotion = _targetMotion;
+            _pulseState = RUNNING;
             _stateTimerMs = millis();
             
-            // Log structural step reference point before motor begins applying mechanical energy
+            // Log reference point before the motor begins moving.
             _motorStartTimestampMs = _stateTimerMs; 
             _motorStartPosPercentage = _calculatedPosition;
+            writeHardwarePins(_currentMotion, false);
         } else if (_pulseState == RUNNING && _targetMotion != _currentMotion) {
-            _pulseState = PULSE_STOP;
+            _pulseState = STOP_PULSE;
             _stateTimerMs = millis();
         }
     }
 
     void updatePositionTracking() {
-        if (_currentMotion != STOP && _pulseState == RUNNING) {
+        if (_currentMotion != STOP && _pulseState != IDLE) {
             uint32_t currentRunDuration = millis() - _motorStartTimestampMs;
             float projectedDelta = ((float)currentRunDuration / (float)_fullTravelTimeMs) * 100.0f;
             
@@ -235,7 +236,6 @@ private:
 
     void processPulseStateMachine() {
         uint32_t currentTimeMs = millis();
-        const uint32_t PULSE_DURATION_MS = 500UL;
         
         switch (_pulseState) {
             case IDLE:
@@ -243,58 +243,40 @@ private:
                 _currentMotion = STOP;
                 break;
                 
-            case PULSE_START:
-                _currentMotion = _targetMotion;
-                writeHardwarePins(_currentMotion, true);
-                
-                if (currentTimeMs - _stateTimerMs >= PULSE_DURATION_MS) {
-                    _pulseState = RUNNING;
-                    // Reset track timing window baseline specifically for runtime updates
-                    _motorStartTimestampMs = currentTimeMs;
-                }
-                break;
-                
             case RUNNING:
-                writeHardwarePins(_currentMotion, true);
+                writeHardwarePins(_currentMotion, false);
                 
                 if (_currentMode == DIRECT_MOTION) {
                     _targetPosition = _currentPosition;
                 } 
                 else if (_currentMode == PERCENTAGE_POSITION) {
-                    if ((_currentMotion == FORWARD && _targetPosition == 100 && _currentPosition == 100) ||
-                        (_currentMotion == REWIND && _targetPosition == 0 && _currentPosition == 0)) {
-                        // Endpoint target already reached; keep the target synced without sending a stop pulse.
-                        _targetPosition = _currentPosition;
+                    if (_currentPosition == _targetPosition && _currentMotion != STOP) {
+                        // Target reached; stop with a 100 ms dual-relay pulse.
+                        initiateTransition(STOP);
+                        _isSettling = true;
                     }
                 }
                 break;
                 
-            case PULSE_STOP:
-                {
-                    Motion counterBrakeDirection = (_currentMotion == FORWARD) ? REWIND : FORWARD;
-                    writeHardwarePins(counterBrakeDirection, true);
-                }
-                
-                if (currentTimeMs - _stateTimerMs >= PULSE_DURATION_MS) {
-                    writeHardwarePins(STOP, false); 
+            case STOP_PULSE:
+                writeHardwarePins(STOP, true);
+
+                if (currentTimeMs - _stateTimerMs >= _stopPulseMs) {
+                    writeHardwarePins(STOP, false);
                     _currentMotion = STOP;
-                    _pulseState = PULSE_REVERSE;
-                    _stateTimerMs = currentTimeMs;
-                }
-                break;
-                
-            case PULSE_REVERSE:
-                writeHardwarePins(STOP, false);
-                
-                if (currentTimeMs - _stateTimerMs >= PULSE_DURATION_MS) {
-                    _isSettling = false; 
-                    
+                    _isSettling = false;
+
                     if (_targetMotion != STOP) {
-                        _pulseState = PULSE_START; 
+                        _currentMotion = _targetMotion;
+                        _pulseState = RUNNING;
+                        _stateTimerMs = currentTimeMs;
+                        _motorStartTimestampMs = currentTimeMs;
+                        _motorStartPosPercentage = _calculatedPosition;
+                        writeHardwarePins(_currentMotion, false);
                     } else {
                         _pulseState = IDLE;
+                        _stateTimerMs = currentTimeMs;
                     }
-                    _stateTimerMs = currentTimeMs;
                 }
                 break;
         }

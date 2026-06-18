@@ -17,12 +17,9 @@ It lets you open, close, and stop two curtain motors indipendently from DMX, Art
 ## 🔧 Supported Hardware
 - Designed for [Mottura Power 571/1 motors](https://mottura.com/en/products/power/) curtain motors.
 - The motor remote interface is a 3-wire dry-contact remote: `CLOSE`, `COM`, `OPEN`. Motion is activated by short circuit CLOSE or OPEN to COM. The controller emulates this by switching the `CLOSE` or `OPEN` contact to `COM` via relays.
-- The curtain motor is pulse-controlled: a short pulse in the open or close direction starts motion up to next intermediate endpoint, and a pulse in the opposite direction stops it. A long pulse open/close the curtain completely regardless of presets.
-- Pulse-controlled motors respond to momentary dry-contact closures. A directional pulse starts motion in that direction; applying the opposite-direction pulse stops (or reverses) motion depending on timing and wiring.
-- Short pulse: used to step toward an intermediate preset.
-- Long pulse: bypass presets and run until a physical end-stop or a STOP command is received.
+- Each curtain uses two relays: one for open and one for close. Energizing the open relay moves the curtain open, energizing the close relay moves it closed, and a 100 ms pulse on both relays stops movement.
+- Pulse-controlled motors respond to momentary dry-contact closures. A directional pulse starts motion in that direction; applying both directions together for 100 ms stops motion.
 - For percentage-mode position estimation, set `CURTAIN_TRAVEL_TIME_MS` to match full-travel runtime.
-- Use interlocked relay pairs so forward and rewind contacts cannot be energized at the same time.
 - Motor power must be powered independently of the ESP8266; the ESP only switches dry contacts.
 
 ## 🔢 DMX Channel Reference
@@ -31,7 +28,7 @@ It lets you open, close, and stop two curtain motors indipendently from DMX, Art
 | 507 | `DMX_CURTAIN_ENABLE_DMX_CHANNEL` | DMX controller enable | `0..127` = disabled, `128..255` = enabled |
 | 508 | `LEFT_CURTAIN_PERCENT_DMX_CHANNEL` | Left curtain percentage target | `0..255` → `0%..100%` (0 = open, 255 = close) |
 | 509 | `RIGHT_CURTAIN_PERCENT_DMX_CHANNEL` | Right curtain percentage target | `0..255` → `0%..100%` |
-| 510 | `LEFT_CURTAIN_DMX_CHANNEL` | Left curtain direct (open/stop/close) | `0..84` = rewind, `85..170` = stop, `171..255` = forward |
+| 510 | `LEFT_CURTAIN_DMX_CHANNEL` | Left curtain direct (open/stop/close) | `0..84` = close, `85..170` = stop, `171..255` = open |
 | 511 | `RIGHT_CURTAIN_DMX_CHANNEL` | Right curtain direct (open/stop/close) | same 3-zone mapping as left |
 
 Note: direct (open/stop/close) commands take precedence over percentage targets when both change in the same update cycle.
@@ -56,18 +53,18 @@ This app communicates directly with the device over **Wi-Fi**. No source code mo
 | Male XLR 3 pins        | 1        | DMX output (optional) |
 | MAX3485                | 1        | RS485 transceiver |
 | [1 Relay Module 5V](https://www.wemos.cc/en/latest/d1_mini_shield/relay.html)      | 1        | Manual bypass/enable |
-| [4 Relays Module 5V](http://wiki.sunfounder.cc/index.php?title=4_Channel_5V_Relay_Module)     | 1        | Interlocked wiring for forward/rewind switching |
+| [4 Relays Module 5V](http://wiki.sunfounder.cc/index.php?title=4_Channel_5V_Relay_Module)     | 1        | Open/close switching |
 | 5V 1A Power Supply     | 1        | Power supply for Wemos board and relays boards. Max power consumption is 2W or 400mA. |
 
 ## 📌 Pin Mapping
 | Wemos D1 Mini Pin | Function | Notes |
 |-------------------|----------|-------|
-| `D1` | `LEFT_CURTAIN_ENABLE_PIN` | Left curtain relay enable output |
-| `D2` | `LEFT_CURTAIN_DIRECTION_PIN` | Left curtain forward/rewind select |
-| `D3` | `DIRECTION_PIN` | DMX direction control |
+| `D1` | `LEFT_CURTAIN_OPEN_PIN` | Left curtain open relay output |
+| `D2` | `LEFT_CURTAIN_CLOSE_PIN` | Left curtain close relay output |
+| `D3` | `DIRECTION_PIN` | DMX interface IN/OUT control |
 | `D4` | `BUILTIN_LED` | Built-in led and DMX output |
-| `D5` | `RIGHT_CURTAIN_ENABLE_PIN` | Right curtain relay enable output |
-| `D6` | `RIGHT_CURTAIN_DIRECTION_PIN` | Right curtain forward/rewind select |
+| `D5` | `RIGHT_CURTAIN_OPEN_PIN` | Right curtain open relay output |
+| `D6` | `RIGHT_CURTAIN_CLOSE_PIN` | Right curtain close relay output |
 | `D7` | `DMX_CURTAIN_ENABLE_PIN` | Manual override enable output driven by DMX channel 507 |
 | `RX` | DMX input | Serial DMX via RS485 receiver |
 | `TX` | `STARTUP_MODE_PIN` | Force default setup when LOW on boot |
@@ -95,14 +92,14 @@ Wemos D1 Mini                                                  DMX connector
 
 DMX input and output connectors, if present, can be connected in parallel (1<->1, 2<->2 and 3<->3) to continue the DMX chain.
 
-## 🔁 Interlocked Relay Wiring
+## 🔁 Relay Wiring
 
-Each curtain requires one interlocked relay pair.
+Each curtain requires one open relay and one close relay.
 One additional relay is used to switch between the local remote controller and the DMX stage curtain controller.
 
 The local controller, curtain motor, and DMX controller are wired in parallel for the three motor lines, except for the COM wire. The bypass relay switches the motor COM between the local controller COM and the DMX controller path. When that relay is not energized, the local controller is active. When it is energized, the DMX controller takes over.
 
-For each curtain, `D1` and `D5` act as the COM transfer relays. They connect motor COM to the next pair of directional relays, which are driven by `D2` and `D6`.
+For each curtain, `D1` and `D5` drive the open relays. `D2` and `D6` drive the close relays. Relay is on NC status when IN is not connected or VCC (GPIO output is only 3.3V but it is enough for NC status). Relay switches to NO status when IN is set to GND.
 
 ```
           FROM LOCAL REMOTE CONTROLLER                             TO CURTAIN MOTOR
@@ -136,17 +133,17 @@ For each curtain, `D1` and `D5` act as the COM transfer relays. They connect mot
                                                  |       |         |             |         |
                                                  |       |         |             |         |
                +---------------+                 |       |         |             |         |
-               |       +--- NC |--               |       |         |             |         |
+               |       +--- NC |-                |       |         |             |         |
                |        \      |                 |       |         |             |         |
      D1  ------| IN1     + COM |-----------------+       |         |             |         |
                |               |                 |       |         |             |         |
-               |       +--- NO |-----------+     |       |         |             |         |
-               +---------------+           |     |       |         |             |         |
-LEFT CURTAIN                               |     |       |         |             |         |
-               +---------------+           |     |       |         |             |         |
-               |       +--- NC |-----------------------------------+             |         |
-               |        \      |           |     |       |                       |         |
-     D2  ------| IN2     + COM |-----------+     |       |                       |         |
+               |       +--- NO |-----------------------------------+             |         |
+               +---------------+                 |       |                       |         |
+LEFT CURTAIN                                     |       |                       |         |
+               +---------------+                 |       |                       |         |
+               |       +--- NC |-                |       |                       |         |
+               |        \      |                 |       |                       |         |
+     D2  ------| IN2     + COM |-----------------+       |                       |         |
                |               |                 |       |                       |         |
                |       +--- NO |-------------------------+                       |         |
                +---------------+                 |                               |         |
@@ -155,20 +152,20 @@ LEFT CURTAIN                               |     |       |         |            
                |       +--- NC |--               |                               |         |
                |        \      |                 |                               |         |
      D5  ------| IN3     + COM |-----------------+                               |         |
-               |               |                                                 |         |
-               |       +--- NO |-------------+                                   |         |
-               +---------------+             |                                   |         |
-RIGHT CURTAIN                                |                                   |         |
-               +---------------+             |                                   |         |
-               |       +--- NC |-----------------------------------------------------------+
-               |        \      |             |                                   |
-     D6  ------| IN4     + COM |-------------+                                   |
+               |               |                 |                               |         |
+               |       +--- NO |-----------------------------------------------------------+
+               +---------------+                 |                               |
+RIGHT CURTAIN                                    |                               |
+               +---------------+                 |                               |
+               |       +--- NC |-                |                               |
+               |        \      |                 |                               |
+     D6  ------| IN4     + COM |-----------------+                               |
                |               |                                                 |
                |       +--- NO |-------------------------------------------------+
                +---------------+
+```
 
-
-
+```
 Power Supply          Wemos D1 Mini          4 Relays Board           1 Relay Board
    5V 1A                5V    GND               VCC   GND               VCC   GND
                          +     +                 +     +                 +    +
@@ -202,9 +199,9 @@ Power Supply          Wemos D1 Mini          4 Relays Board           1 Relay Bo
 ## 📚 Technical Reference
 
 - Control mapping:
-  - Left curtain: `LEFT_CURTAIN_ENABLE_PIN` + `LEFT_CURTAIN_DIRECTION_PIN`
-  - Right curtain: `RIGHT_CURTAIN_ENABLE_PIN` + `RIGHT_CURTAIN_DIRECTION_PIN`
-  - Direct DMX channels use a 3-zone mapping: `0..84` = rewind, `85..170` = stop, `171..255` = forward.
+  - Left curtain: `LEFT_CURTAIN_OPEN_PIN` + `LEFT_CURTAIN_CLOSE_PIN`
+  - Right curtain: `RIGHT_CURTAIN_OPEN_PIN` + `RIGHT_CURTAIN_CLOSE_PIN`
+  - Direct DMX channels use a 3-zone mapping: `0..84` = close, `85..170` = stop, `171..255` = open.
   - Percentage DMX channels map `0..255` → `0..100%` for target-position control.
 
 - Modes:
@@ -226,12 +223,12 @@ Power Supply          Wemos D1 Mini          4 Relays Board           1 Relay Bo
 
 
 ## 🧩 Curtain Integration
-- **Dry Contact Relay Design**: The interlocked relay approach using dry contacts is motor-agnostic. It can works with minimal or no changes in different scenario not tested by me.
+- **Dry Contact Relay Design**: The open/close relay approach using dry contacts is motor-agnostic. It can work with minimal or no changes in different scenarios not tested by me.
 - The ESP8266 only switches low-power control signals; motor power is entirely isolated.
 
 ## ⚠️ Safety Notes
 - Curtain motors can pinch or jam if the travel range is not calibrated correctly.
-- Double-check relay wiring and interlock behavior before powering on.
+- Double-check relay wiring and DO NOT USE where interlock behavior is requested.
 - Verify that the curtain direction matches the DMX open/close mapping before using it in production.
 
 ## 📜 License

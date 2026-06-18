@@ -62,9 +62,9 @@
                                  // When connection to Station fail or timeout happens, it starts with default configuration (AP mode). There is no need to have a startup button.
 #define DIRECTION_PIN     D3     // GPIO0 Pin for output direction enable on MAX485 chip
 
-// Curtain relay control pins (interlocked relays):
-// - *_ENABLE_PIN: enables motor power
-// - *_DIRECTION_PIN: selects forward/rewind direction
+// Curtain relay control pins:
+// - *_OPEN_PIN: energizes the open relay
+// - *_CLOSE_PIN: energizes the close relay
 
 #define DMX_CURTAIN_ENABLE_DMX_CHANNEL 507
 #define LEFT_CURTAIN_PERCENT_DMX_CHANNEL   508
@@ -72,16 +72,16 @@
 #define LEFT_CURTAIN_DMX_CHANNEL  510
 #define RIGHT_CURTAIN_DMX_CHANNEL 511
 
-#define CURTAIN_TRAVEL_TIME_MS 20000UL
+#define CURTAIN_TRAVEL_TIME_MS 21000UL
 
-#define LEFT_CURTAIN_ENABLE_PIN     D1
-#define LEFT_CURTAIN_DIRECTION_PIN  D2
-#define RIGHT_CURTAIN_ENABLE_PIN    D5
-#define RIGHT_CURTAIN_DIRECTION_PIN D6
-#define DMX_CURTAIN_ENABLE_PIN      D7
+#define LEFT_CURTAIN_OPEN_PIN     D1
+#define LEFT_CURTAIN_CLOSE_PIN    D2
+#define RIGHT_CURTAIN_OPEN_PIN    D5
+#define RIGHT_CURTAIN_CLOSE_PIN   D6
+#define DMX_CURTAIN_ENABLE_PIN    D7
 
-CurtainController leftCurtain(LEFT_CURTAIN_ENABLE_PIN, LEFT_CURTAIN_DIRECTION_PIN, false, false, CURTAIN_TRAVEL_TIME_MS);
-CurtainController rightCurtain(RIGHT_CURTAIN_ENABLE_PIN, RIGHT_CURTAIN_DIRECTION_PIN, false, false, CURTAIN_TRAVEL_TIME_MS);
+CurtainController leftCurtain(LEFT_CURTAIN_OPEN_PIN, LEFT_CURTAIN_CLOSE_PIN, false, CURTAIN_TRAVEL_TIME_MS);
+CurtainController rightCurtain(RIGHT_CURTAIN_OPEN_PIN, RIGHT_CURTAIN_CLOSE_PIN, false, CURTAIN_TRAVEL_TIME_MS);
 
 extern LXWiFiArtNet* artNetInterface;
 extern LXWiFiSACN*   sACNInterface;
