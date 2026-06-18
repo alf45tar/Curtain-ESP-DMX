@@ -3,7 +3,7 @@
 DMX512 curtain controller for an ESP8266.
 It lets you open, close, and stop two curtain motors indipendently from DMX, Art-Net and sACN.
 
-![Assembly](images/Assembly.jpg)
+![Main Components](images/main-components.jpg)
 
 ## 🔑 Key Features
 - Use it to control two curtains from DMX.
@@ -221,6 +221,16 @@ Power Supply          Wemos D1 Mini          4 Relays Board           1 Relay Bo
   - Channel and pin constants are in `Curtain-ESP-DMX.ino`.
   - Position timing (`CURTAIN_TRAVEL_TIME_MS`) is used to convert motor runtime into percentage position and should match your hardware.
 
+## 📸 Images
+
+### Box Assembly
+![Closed Box](images/closed-box.jpg)
+![Open Box](images/open-box.jpg)
+
+### Module Assembly
+![Closed Module](images/closed-module.jpg)
+![Open Module](images/open-module.jpg)
+![Assembled Module](images/assembled-module.jpg)
 
 ## 🧩 Curtain Integration
 - **Dry Contact Relay Design**: The open/close relay approach using dry contacts is motor-agnostic. It can work with minimal or no changes in different scenarios not tested by me.
